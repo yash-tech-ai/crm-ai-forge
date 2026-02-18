@@ -2,305 +2,289 @@
 
 ## Overview
 
-The CRM AI Forge platform is built in 5 phases, each delivering incrementally usable value. Each phase ends with a deployable milestone.
+CRM AI Forge is built in **4 phases**, each delivering deployable value. The approach: **agent-first, dashboard-second** — get conversational CRM working before building the visual UI.
 
 ```
-Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 ──► Phase 5
-Foundation   Campaign    Agent       Multi-      Enterprise
-& Core CRM  Engine      Intelligence Channel
+Phase 1 (Weeks 1-6)     Phase 2 (Weeks 7-12)    Phase 3 (Weeks 13-18)   Phase 4 (Weeks 19-24)
+"Walk"                   "Run"                    "Fly"                    "Soar"
+Foundation + Core CRM    Campaign Engine          Agent Intelligence       Scale & Polish
+Talk to CRM via chat     Create & send campaigns  Proactive AI coaching    Production-ready
 ```
 
 ---
 
-## Phase 1: Foundation & Core CRM
+## Phase 1: Foundation & Core CRM — "Walk"
 
-**Goal:** A working CRM with contact management, deal pipeline, task management, and basic AI integration via OpenClaw.
+**Goal:** Sales team can manage contacts and deals by messaging the bot on WhatsApp/Slack.
 
-### 1.1 Project Setup
-- [x] Architecture documentation
+### Week 1-2: Infrastructure & Skeleton
+
 - [ ] Monorepo scaffolding (pnpm workspaces + Turborepo)
-- [ ] Docker Compose for local development (PostgreSQL, Redis, MinIO)
-- [ ] Shared package: types, constants, validation schemas
+- [ ] Docker Compose (PostgreSQL 16 + pgvector, Redis 7, MinIO)
+- [ ] Prisma schema (all core models from schema.md)
+- [ ] Database migrations + seed script (demo data)
+- [ ] Fastify app setup (CORS, rate limit, JWT auth, tenant middleware)
+- [ ] Shared package (types, constants, Zod schemas)
 - [ ] CI pipeline (GitHub Actions: lint, typecheck, test)
 
-### 1.2 Database & Backend Foundation
-- [ ] Prisma schema (all core models)
-- [ ] Database migrations
-- [ ] Seed script (demo data for development)
-- [ ] Fastify app setup with plugins (CORS, rate limit, JWT)
-- [ ] Auth middleware (JWT verification, tenant context)
-- [ ] Base service pattern (CRUD + pagination + filtering)
-- [ ] Domain event emitter
+### Week 2-3: Auth & Core API
 
-### 1.3 Authentication & Multi-Tenancy
-- [ ] Registration endpoint (creates tenant + admin user)
+- [ ] Registration endpoint (creates tenant + admin user + default pipeline)
 - [ ] Login/logout/refresh token flow
-- [ ] Tenant context middleware (auto-inject tenant_id)
-- [ ] Role-based access control (admin, manager, member)
-- [ ] NextAuth.js integration in frontend
-
-### 1.4 Contact & Company Management
-- [ ] Contact CRUD API (create, read, update, soft-delete)
-- [ ] Contact search (full-text via PostgreSQL)
-- [ ] Contact filtering (status, lifecycle, score, tags, date range)
+- [ ] Tenant context middleware (auto-inject tenant_id in all queries)
+- [ ] Contact CRUD API (create, read, update, soft-delete, search, filter)
 - [ ] Company CRUD API
-- [ ] Contact-Company association
+- [ ] Deal CRUD API (with stage transitions + activity logging)
+- [ ] Pipeline API (with stages)
+- [ ] Task CRUD API
 - [ ] Activity timeline API
 - [ ] Notes API
-- [ ] CSV import (BullMQ background job)
-- [ ] Frontend: Contact list with table, filters, search
-- [ ] Frontend: Contact detail page with activity timeline
-- [ ] Frontend: Company list and detail pages
-- [ ] Frontend: Contact/Company create and edit forms
+- [ ] Domain event emitter (Redis Pub/Sub)
 
-### 1.5 Deal Pipeline
-- [ ] Pipeline CRUD API (with stages)
-- [ ] Deal CRUD API
-- [ ] Deal stage transition API (with activity logging)
-- [ ] Default pipeline seeding (Qualification → Discovery → Proposal → Negotiation → Won/Lost)
-- [ ] Frontend: Kanban board with drag-and-drop
-- [ ] Frontend: Deal detail page
-- [ ] Frontend: Deal create/edit form
+### Week 3-4: OpenClaw Setup
 
-### 1.6 Task Management
-- [ ] Task CRUD API
-- [ ] Task assignment and status transitions
-- [ ] Overdue task detection
-- [ ] Frontend: Task list with filters
-- [ ] Frontend: Task create/edit form
-- [ ] Frontend: Tasks in contact/deal detail pages
+- [ ] Install OpenClaw, configure openclaw.json with Orchestrator agent
+- [ ] Create workspace: AGENTS.md, SOUL.md, TOOLS.md
+- [ ] Build `crm-core` skill (CRUD via API calls)
+- [ ] Build `lead-management` skill (basic scoring + routing)
+- [ ] Build `sales-assistant` skill (basic deal management)
+- [ ] Connect first channel (WhatsApp or Slack)
+- [ ] Test: "Add a new lead: John Doe, john@test.com, Acme Inc"
+- [ ] Test: "Show me all leads"
+- [ ] Test: "Update deal #X to Proposal stage"
 
-### 1.7 Dashboard Shell
-- [ ] Frontend: Sidebar navigation
-- [ ] Frontend: Header with user menu, notifications
-- [ ] Frontend: Dashboard page with placeholder KPIs
-- [ ] Frontend: Responsive layout (desktop + mobile)
+### Week 5-6: Basic Dashboard
+
+- [ ] Next.js 14 app setup (App Router, Tailwind, shadcn/ui)
+- [ ] Auth pages (login, register)
+- [ ] Dashboard shell (sidebar, header, navigation)
+- [ ] Contact list page (table with search, filters, pagination)
+- [ ] Contact detail page (with activity timeline)
+- [ ] Deal pipeline page (Kanban board with drag-and-drop)
+- [ ] Task list page
 - [ ] WebSocket connection for real-time updates
+- [ ] Basic dashboard KPI cards (placeholder data)
 
-### 1.8 Basic OpenClaw Integration
-- [ ] OpenClaw workspace setup (AGENTS.md, SOUL.md, TOOLS.md)
-- [ ] Agent execute API endpoint
-- [ ] Single "Supervisor" skill that can query contacts and deals
-- [ ] Basic conversational CRM access via one channel (e.g., WebChat)
-
-**Phase 1 Deliverable:** A fully functional CRM with contacts, companies, deals, tasks, and basic AI chat — accessible via web dashboard and one messaging channel.
+**Phase 1 Deliverable:** Sales team can manage contacts, deals, and tasks via WhatsApp/Slack AND a web dashboard. Basic AI scoring and routing works.
 
 ---
 
-## Phase 2: Campaign Engine
+## Phase 2: Campaign Engine — "Run"
 
-**Goal:** Complete email campaign management with templates, segmentation, scheduling, and analytics.
+**Goal:** Marketing can create, send, and analyze email campaigns via chat or dashboard.
 
-### 2.1 Email Templates
-- [ ] Template CRUD API
+### Week 7-8: Email Templates & Segments
+
+- [ ] EmailTemplate CRUD API
+- [ ] MJML template compilation (MJML -> HTML)
 - [ ] Variable interpolation engine ({{first_name}}, {{company}}, etc.)
 - [ ] Template rendering/preview endpoint
-- [ ] Frontend: Template list
-- [ ] Frontend: Template editor (HTML + preview pane)
-- [ ] Starter template library (5-10 pre-built templates)
-
-### 2.2 Audience Segmentation
-- [ ] Segment CRUD API
-- [ ] Dynamic segment filter engine (query builder → SQL)
+- [ ] Starter template library (5 pre-built templates)
+- [ ] AudienceSegment CRUD API
+- [ ] Dynamic segment filter engine (filter criteria JSON -> Prisma query)
 - [ ] Segment contact preview endpoint
-- [ ] Segment contact count caching
-- [ ] Auto-recompute on schedule (BullMQ job)
+- [ ] Segment contact count caching + auto-recompute (BullMQ job)
+- [ ] Frontend: Template editor (MJML source + HTML preview)
 - [ ] Frontend: Segment builder (visual filter UI)
-- [ ] Frontend: Segment contact preview
 
-### 2.3 Campaign Management
+### Week 9-10: Campaign Sending
+
 - [ ] Campaign CRUD API
 - [ ] Campaign scheduling endpoint
-- [ ] Campaign send orchestration (BullMQ)
-- [ ] Batch email sending (100/batch, rate-limited)
-- [ ] Campaign pause/resume functionality
-- [ ] Unsubscribe management (list + one-click unsubscribe link)
-- [ ] Bounce handling (webhook from email provider)
-- [ ] Frontend: Campaign list with status badges
-- [ ] Frontend: Campaign creation wizard (segment → template → settings → review)
-- [ ] Frontend: Campaign detail page
-
-### 2.4 Campaign Analytics
+- [ ] BullMQ campaign send worker (batch 100/send, rate-limited)
+- [ ] Email sending via Nodemailer (SES/SMTP)
 - [ ] Open tracking (tracking pixel)
-- [ ] Click tracking (link rewriting + redirect)
-- [ ] Campaign analytics aggregation
-- [ ] Per-recipient status tracking
-- [ ] Frontend: Campaign analytics dashboard (open rate, CTR, bounces, etc.)
-- [ ] Frontend: Hourly engagement chart
+- [ ] Click tracking (link rewriting + redirect endpoint)
+- [ ] Bounce handling (SES webhook)
+- [ ] Unsubscribe management (one-click unsubscribe link + Unsubscribe table)
+- [ ] Campaign pause/resume
+- [ ] Build `campaign-builder` skill for OpenClaw
+- [ ] Test: "Create a campaign for inactive customers with 15% discount"
 
-### 2.5 A/B Testing
-- [ ] A/B test configuration (subject line, content, send time)
-- [ ] Variant splitting logic
-- [ ] Winner detection (auto-select after threshold)
-- [ ] Frontend: A/B test setup in campaign wizard
-- [ ] Frontend: A/B results comparison view
+### Week 11-12: Campaign Analytics & Compliance
 
-**Phase 2 Deliverable:** Full email campaign management — create segments, design templates, schedule campaigns, track performance, run A/B tests.
+- [ ] Campaign analytics aggregation (per-recipient -> campaign-level metrics)
+- [ ] A/B testing engine (variant splitting, winner detection)
+- [ ] Build `compliance-agent` skill (mandatory campaign gate)
+- [ ] Campaign compliance status workflow (DRAFT -> PENDING_COMPLIANCE -> SCHEDULED)
+- [ ] Drip campaign sequences (AutomationSequence + SequenceEnrollment)
+- [ ] Drip processor cron job (every 15 min)
+- [ ] Frontend: Campaign list with status badges
+- [ ] Frontend: Campaign creation wizard (segment -> template -> settings -> review)
+- [ ] Frontend: Campaign analytics dashboard
+- [ ] Frontend: A/B test results view
+
+**Phase 2 Deliverable:** Full email campaign management — segments, MJML templates, scheduling, A/B tests, compliance gate, drip sequences, analytics.
 
 ---
 
-## Phase 3: Agent Intelligence
+## Phase 3: Agent Intelligence — "Fly"
 
-**Goal:** Specialist AI agents that autonomously handle CRM operations — lead scoring, campaign optimization, deal forecasting, and proactive alerts.
+**Goal:** Agents become proactive — they score leads, coach sales, optimize campaigns, and alert users without being asked.
 
-### 3.1 Agent Infrastructure
-- [ ] Agent orchestrator service
-- [ ] Base agent class with standard interface
-- [ ] Agent message bus (Redis Pub/Sub)
-- [ ] Agent action logging (AgentActionLog table)
-- [ ] Agent confidence scoring framework
-- [ ] Error handling and fallback chain
+### Week 13-14: Enrichment & Advanced Scoring
 
-### 3.2 Lead Agent
-- [ ] Lead scoring algorithm implementation
-- [ ] Automatic lead qualification (MQL → SQL transitions)
-- [ ] Lead assignment logic (round-robin, workload-based)
-- [ ] Duplicate contact detection
-- [ ] OpenClaw skill: crm-lead-management
-- [ ] Scheduled re-scoring job (daily cron)
+- [ ] Build Enrichment Agent skill (LinkedIn browser automation + APIs)
+- [ ] Apollo/Clearbit API integration
+- [ ] Batch enrichment cron job (2 AM daily, 50 contacts)
+- [ ] Advanced lead scoring (fit + intent + recency with decay)
+- [ ] Automatic lead qualification (MQL -> SQL transitions)
+- [ ] Lead assignment engine (round-robin, workload-based)
+- [ ] Lead re-scoring cron job (every 4 hours)
 
-### 3.3 Campaign Agent
-- [ ] Campaign creation from natural language
-- [ ] Send time optimization (historical analysis)
-- [ ] Content suggestions (subject lines, CTAs)
-- [ ] Post-campaign analysis with recommendations
-- [ ] OpenClaw skill: crm-campaign-engine
+### Week 15-16: Sales Coaching & Proactive Alerts
 
-### 3.4 Pipeline Agent
-- [ ] Revenue forecasting (weighted pipeline)
-- [ ] Stale deal detection and alerts
-- [ ] Stage transition recommendations
-- [ ] Win/loss pattern analysis
-- [ ] OpenClaw skill: crm-deal-pipeline
+- [ ] Sales Agent: call prep generation (full briefing)
+- [ ] Sales Agent: follow-up email drafting (post-call)
+- [ ] Sales Agent: stale deal detection cron (9 AM, 3 PM weekdays)
+- [ ] Sales Agent: daily priority list cron (8 AM weekdays)
+- [ ] Pipeline forecasting (probability-weighted revenue)
+- [ ] Canvas dashboard rendering (pipeline funnel, KPIs)
+- [ ] Morning digest cron (8 AM: new leads, tasks, deal updates)
+- [ ] Weekly executive summary cron (Friday 5 PM)
 
-### 3.5 Analytics Agent
-- [ ] Natural language query → SQL/analytics
-- [ ] Dashboard summary generation
-- [ ] Trend detection and anomaly alerts
-- [ ] Proactive insight notifications
-- [ ] OpenClaw skill: crm-analytics-reports
+### Week 17-18: Analytics Intelligence & Agent Dashboard
 
-### 3.6 Agent Dashboard
+- [ ] Insight Agent: natural language -> analytics query
+- [ ] Insight Agent: trend detection (week-over-week patterns)
+- [ ] Insight Agent: anomaly alerts (bounce spike, deal stagnation)
+- [ ] Campaign Agent: send time optimization (historical analysis)
+- [ ] Campaign Agent: auto A/B test resolution (every 30 min)
+- [ ] Campaign Agent: post-campaign recommendations
+- [ ] pgvector setup: contact embeddings for semantic search
+- [ ] Agent action logging (AgentActionLog table, parent-child chains)
 - [ ] Frontend: Agent activity log
-- [ ] Frontend: Agent performance metrics
-- [ ] Frontend: AI suggestions in context (contacts, deals, campaigns)
-- [ ] Frontend: Chat widget with agent interaction
+- [ ] Frontend: AI suggestion cards in contact/deal detail pages
+- [ ] Frontend: Chat widget for AI interaction in dashboard
 
-**Phase 3 Deliverable:** Intelligent agents that score leads, suggest campaigns, forecast revenue, and proactively alert users — accessible via dashboard and messaging channels.
-
----
-
-## Phase 4: Multi-Channel Communication
-
-**Goal:** Unified communication across email, WhatsApp, Telegram, Slack, and SMS — all managed through a single inbox.
-
-### 4.1 Channel Integration
-- [ ] WhatsApp integration via OpenClaw
-- [ ] Telegram integration via OpenClaw
-- [ ] Slack integration via OpenClaw
-- [ ] SMS integration (Twilio or similar)
-- [ ] Channel-specific message formatting
-
-### 4.2 Unified Inbox
-- [ ] Conversation threading model (multi-channel per contact)
-- [ ] Real-time message synchronization
-- [ ] Frontend: Unified inbox UI (conversations list + chat view)
-- [ ] Frontend: Channel indicator per message
-- [ ] Frontend: Reply from any channel
-
-### 4.3 Support Agent
-- [ ] Customer inquiry classification
-- [ ] Auto-response generation
-- [ ] Sentiment analysis
-- [ ] Escalation rules engine
-- [ ] OpenClaw skill: crm-customer-support
-
-### 4.4 Multi-Channel Campaigns
-- [ ] WhatsApp campaign support
-- [ ] SMS campaign support
-- [ ] Channel selection in campaign wizard
-- [ ] Per-channel template variants
-- [ ] Cross-channel analytics
-
-**Phase 4 Deliverable:** Unified inbox with multi-channel messaging. Support agent handles inquiries. Campaigns run across email, WhatsApp, and SMS.
+**Phase 3 Deliverable:** Agents proactively score leads, prep calls, detect risks, optimize campaigns, and generate reports. Canvas dashboards. Semantic search.
 
 ---
 
-## Phase 5: Enterprise & Advanced Features
+## Phase 4: Scale & Polish — "Soar"
 
-**Goal:** Enterprise-ready features for scaling to larger teams and more complex workflows.
+**Goal:** Production-ready, multi-tenant capable, with multi-channel support and enterprise features.
 
-### 5.1 Automation Workflows
-- [ ] Visual workflow builder (trigger → condition → action)
-- [ ] Event-triggered workflows (contact created, deal stage changed, etc.)
-- [ ] Time-based triggers (delays, schedules)
-- [ ] Multi-step workflows with branching logic
-- [ ] Workflow templates library
-- [ ] Frontend: Drag-and-drop workflow builder
+### Week 19-20: Multi-Channel & Support
 
-### 5.2 Advanced Analytics
-- [ ] Custom report builder
-- [ ] Scheduled report delivery (email)
-- [ ] Export reports (PDF, CSV)
-- [ ] Sales team performance leaderboard
-- [ ] Revenue attribution (which campaigns drive deals)
-- [ ] Cohort analysis
+- [ ] WhatsApp Business API integration (campaigns + inbox)
+- [ ] Telegram channel integration
+- [ ] SMS campaign support (Twilio)
+- [ ] Unified inbox model (multi-channel per contact)
+- [ ] Support Agent skill (inquiry handling, sentiment, escalation)
+- [ ] Frontend: Unified inbox UI
+- [ ] Frontend: Multi-channel reply
 
-### 5.3 Integrations
-- [ ] REST API with API key authentication (for third-party)
+### Week 21-22: Automation & Integrations
+
+- [ ] AutomationWorkflow engine (event -> condition -> action)
+- [ ] Frontend: Visual workflow builder (basic)
 - [ ] Webhook system (outbound webhooks on events)
-- [ ] Zapier/Make integration
-- [ ] Google Calendar sync
-- [ ] Google/Microsoft email sync
-- [ ] Slack app (slash commands, notifications)
+- [ ] Web form lead capture webhook handler
+- [ ] Google Calendar sync (optional)
+- [ ] CSV import/export with progress tracking
+- [ ] API key authentication (for third-party access)
 
-### 5.4 Enterprise Features
-- [ ] SSO (SAML 2.0, OIDC)
-- [ ] Audit log viewer
-- [ ] Custom roles and permissions
-- [ ] White-labeling (custom branding, domain)
-- [ ] Data export and portability
-- [ ] GDPR compliance tools (consent management, data deletion)
-- [ ] Multi-language support (i18n)
+### Week 23-24: Production Hardening
 
-### 5.5 Performance & Scale
-- [ ] Read replicas for analytics queries
-- [ ] Connection pooling (PgBouncer)
-- [ ] Elasticsearch/Meilisearch for advanced search
-- [ ] CDN for static assets
-- [ ] Kubernetes deployment manifests
-- [ ] Horizontal auto-scaling
+- [ ] Multi-tenant OpenClaw provisioning (shared vs dedicated)
+- [ ] Performance testing and optimization
+- [ ] Security audit (OWASP top 10 checklist)
+- [ ] Rate limiting tuning (per-tenant quotas)
+- [ ] Monitoring setup (Grafana + Prometheus + Pino)
+- [ ] Token budget enforcement and alerting
+- [ ] Backup strategy (PostgreSQL + MinIO)
+- [ ] Documentation (user guide, API docs, deployment guide)
+- [ ] Docker production compose with health checks
+- [ ] Kubernetes manifests (optional)
 
-**Phase 5 Deliverable:** Enterprise-ready platform with workflow automation, advanced analytics, third-party integrations, SSO, and horizontal scaling.
+**Phase 4 Deliverable:** Production platform with multi-channel messaging, support automation, workflows, monitoring, and enterprise hardening.
+
+---
+
+## Quick Start Guide (First 48 Hours)
+
+### Day 1: Setup OpenClaw + Core
+
+```bash
+# 1. Install OpenClaw
+npm install -g openclaw@latest
+openclaw onboard --install-daemon
+
+# 2. Start infrastructure
+git clone https://github.com/yash-tech-ai/crm-ai-forge.git
+cd crm-ai-forge
+docker compose up -d    # PostgreSQL, Redis, MinIO
+
+# 3. Initialize database
+pnpm install
+pnpm --filter @crm-ai-forge/database db:migrate
+pnpm --filter @crm-ai-forge/database db:seed
+
+# 4. Configure OpenClaw agents
+cp -r openclaw/* ~/.openclaw/
+
+# 5. Set environment variables
+cp .env.example .env
+# Edit .env: add ANTHROPIC_API_KEY, DATABASE_URL, etc.
+
+# 6. Start the API server
+pnpm --filter @crm-ai-forge/api dev
+
+# 7. Connect a channel
+openclaw channels login    # Follow prompts for WhatsApp or Slack
+
+# 8. Test!
+# Send a message: "Add a new lead: Priya Sharma, CTO, priya@technova.in"
+```
+
+### Day 2: First Agent Interactions
+
+```bash
+# Test the pipeline:
+# "Show me all leads"
+# "Score this lead: VP of Engineering at a 500-person fintech"
+# "Create a task to call John Doe tomorrow at 10 AM"
+# "How's my pipeline looking?"
+# "Show me deals stuck for more than a week"
+
+# Verify agents are working:
+openclaw agent --list
+openclaw sessions --list
+
+# Start the frontend:
+pnpm --filter @crm-ai-forge/web dev
+# Open http://localhost:3000
+```
 
 ---
 
 ## Milestone Summary
 
-| Phase | Key Milestone | Core Value Delivered |
-|-------|--------------|---------------------|
-| **Phase 1** | Working CRM + basic AI chat | Manage contacts, deals, tasks with AI assistance |
-| **Phase 2** | Full campaign engine | Create, send, track email campaigns |
-| **Phase 3** | Intelligent agents | Autonomous lead scoring, forecasting, optimization |
-| **Phase 4** | Multi-channel unified inbox | WhatsApp, Telegram, SMS + support automation |
-| **Phase 5** | Enterprise platform | Workflows, integrations, SSO, scale |
+| Phase | Duration | Deliverable | Value |
+|-------|----------|-------------|-------|
+| **Walk** | Weeks 1-6 | CRM + chat + basic dashboard | Manage contacts/deals via messaging |
+| **Run** | Weeks 7-12 | Campaign engine + compliance | Create, send, track email campaigns |
+| **Fly** | Weeks 13-18 | Intelligent agents + Canvas | Proactive scoring, coaching, optimization |
+| **Soar** | Weeks 19-24 | Multi-channel + production | Enterprise-ready platform |
 
 ## Priority Matrix
 
 ```
                           Business Impact
-                    Low ◄─────────────────► High
-                    │                         │
-         Low effort │  Templates Library   │  Contact CRUD       │
-                    │  Custom Fields       │  Deal Pipeline      │
-                    │                      │  Auth & Tenancy     │
-                    ├──────────────────────┼──────────────────────┤
-        High effort │  White-labeling      │  AI Agent System    │
-                    │  SSO/SAML            │  Campaign Engine    │
-                    │  Workflow Builder     │  Multi-Channel      │
-                    │                         │
+                    Low <------------------> High
+                    |                         |
+         Low effort |  Template Library    |  Contact/Deal CRUD     |
+                    |  Custom Fields       |  Auth & Tenancy        |
+                    |                      |  OpenClaw Basic Setup  |
+                    |----------------------|------------------------|
+        High effort |  White-labeling      |  8-Agent System        |
+                    |  SSO/SAML            |  Campaign Engine       |
+                    |  Workflow Builder     |  Multi-Channel         |
+                    |  Calendar Sync       |  Compliance Gate       |
+                    |                         |
 ```
 
-**Start with:** High impact, low effort (Phase 1 core CRM).
-**Build toward:** High impact, high effort (Phase 3 agents, Phase 2 campaigns).
-**Defer:** Low impact, high effort (Phase 5 enterprise features).
+**Start with:** High impact, low effort (Phase 1 core CRM + OpenClaw).
+**Build toward:** High impact, high effort (Phase 2 campaigns, Phase 3 agents).
+**Defer:** Low impact, high effort (enterprise features).

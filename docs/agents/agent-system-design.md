@@ -2,479 +2,621 @@
 
 ## 1. Overview
 
-CRM AI Forge uses a **multi-agent architecture** where specialized AI agents collaborate to handle CRM and campaign operations. The agents are powered by OpenClaw's runtime and communicate through a Supervisor Agent that acts as the orchestrator.
+CRM AI Forge uses **8 specialized AI agents** that collaborate autonomously. The agents are the CRM — not assistants bolted onto a traditional app, but the primary intelligence that drives every operation.
 
 ```
-                    ┌─────────────────────┐
-                    │     USER INPUT       │
-                    │  (any channel)       │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │  SUPERVISOR AGENT    │
-                    │                     │
-                    │  1. Parse intent    │
-                    │  2. Plan execution  │
-                    │  3. Route to agents │
-                    │  4. Consolidate     │
-                    └──┬───┬───┬───┬──┬──┘
-                       │   │   │   │  │
-            ┌──────────┘   │   │   │  └──────────┐
-            ▼              ▼   │   ▼              ▼
-    ┌──────────────┐ ┌────────┐│┌────────┐ ┌──────────────┐
-    │  Lead Agent  │ │Campaign││ │Pipeline│ │Support Agent │
-    │              │ │ Agent  │││ Agent  │ │              │
-    └──────────────┘ └────────┘│└────────┘ └──────────────┘
-                               ▼
-                        ┌──────────────┐
-                        │  Analytics   │
-                        │  Agent       │
-                        └──────────────┘
+                    +---------------------+
+                    |     USER INPUT       |
+                    |  (any channel)       |
+                    +----------+----------+
+                               |
+                    +----------v----------+
+                    |  ORCHESTRATOR        |
+                    |  (Claude Opus 4.6)   |
+                    |                      |
+                    |  1. Classify intent  |
+                    |  2. Plan execution   |
+                    |  3. Spawn sub-agents |
+                    |  4. Consolidate      |
+                    +--+--+--+--+--+--+--+
+                       |  |  |  |  |  |  |
+          +------------+  |  |  |  |  |  +------------+
+          v     v         v  |  v  |  v               v
+       Lead  Campaign  Sales | Insight Enrichment  Compliance
+       Agent  Agent   Agent  |  Agent   Agent       Agent
+       [Sonnet] [Sonnet]     | [Sonnet] [Haiku]   [Sonnet]
+                             v              (read-only,
+                         Support             veto power)
+                          Agent
+                         [Sonnet]
 ```
 
-## 2. Agent Definitions
+## 2. Model Tiering Strategy
 
-### 2.1 Supervisor Agent (Router & Planner)
+Not every task needs the most expensive model. We assign models based on task complexity:
 
-**Purpose:** The Supervisor is the brain of the system. It receives all inbound requests (from OpenClaw channels or the dashboard), classifies intent, decomposes complex tasks, routes to specialist agents, and consolidates responses.
+| Tier | Model | Cost | Used By | Reasoning |
+|------|-------|------|---------|-----------|
+| **Orchestrator** | Claude Opus 4.6 | $$$ | Orchestrator only | Complex routing, multi-step planning, conflict resolution |
+| **Specialist** | Claude Sonnet 4.5 | $$ | Lead, Campaign, Sales, Insight, Compliance, Support | Domain expertise with good quality/cost balance |
+| **Background** | Claude Haiku 4.5 | $ | Enrichment, sub-agents for batch work | High-volume, simpler tasks (data lookup, categorization) |
+| **Local** | Ollama (optional) | Free | Sentiment analysis, simple categorization | Zero cost for repetitive, low-complexity tasks |
 
-**Capabilities:**
-- Natural language intent classification
-- Multi-step task decomposition
-- Agent selection and parallel execution
-- Conflict resolution between agent recommendations
-- Context preservation across conversation turns
-- Fallback to human handoff when confidence is low
+**Estimated cost reduction vs using Opus for everything: 60-75%**
 
-**Intent Classification Categories:**
+## 3. Agent Definitions
+
+### 3.1 Orchestrator Agent (Router & Planner)
+
+**Model:** Claude Opus 4.6 (best reasoning)
+**Workspace:** `~/.openclaw/workspace-crm-orchestrator`
+**Tools:** exec, read, write, edit, sessions_list, sessions_history, sessions_send, sessions_spawn, cron, browser, canvas
+
+**Purpose:** The brain of the system. Receives all inbound requests, classifies intent, decomposes complex tasks, routes to specialist agents (as sub-agents), and consolidates responses.
+
+**Intent Classification:**
 ```
-CONTACT_MANAGEMENT   → Lead Agent
-  - create_contact, update_contact, search_contact, import_contacts
-  - score_lead, qualify_lead, assign_lead
+LEAD_MANAGEMENT      -> Lead Agent
+  create_contact, update_contact, search_contact, import_contacts
+  score_lead, qualify_lead, assign_lead, show_leads
 
-DEAL_MANAGEMENT      → Pipeline Agent
-  - create_deal, update_deal, move_stage, forecast
-  - win_deal, lose_deal
+CAMPAIGN_OPERATIONS  -> Campaign Agent
+  create_campaign, schedule_campaign, pause_campaign
+  create_segment, create_template, ab_test, show_campaigns
 
-CAMPAIGN_OPERATIONS  → Campaign Agent
-  - create_campaign, schedule_campaign, pause_campaign
-  - create_segment, create_template, ab_test
+SALES_OPERATIONS     -> Sales Agent
+  call_prep, deal_update, pipeline_view, follow_up
+  forecast, coaching, show_deals
 
-ANALYTICS_QUERY      → Analytics Agent
-  - dashboard_summary, pipeline_report, campaign_performance
-  - trend_analysis, forecast_revenue
+ANALYTICS_QUERY      -> Insight Agent
+  dashboard, report, metrics, trends, anomalies
+  weekly_summary, comparison
 
-SUPPORT_REQUEST      → Support Agent
-  - customer_inquiry, ticket_create, auto_respond
+DATA_ENRICHMENT      -> Enrichment Agent
+  enrich_contact, find_linkedin, company_lookup
+  verify_email, tech_stack_lookup
 
-MULTI_INTENT         → Supervisor decomposes and routes to multiple agents
-  - "Create a campaign for all leads scored above 80"
-    → Lead Agent (find leads) + Campaign Agent (create campaign)
+COMPLIANCE_CHECK     -> Compliance Agent
+  audit_campaign, check_consent, gdpr_request
+  suppression_list, compliance_report
 
-GENERAL_QUERY        → Supervisor handles directly
-  - help, status, settings
-```
+SUPPORT_REQUEST      -> Support Agent
+  customer_inquiry, ticket_create, auto_respond
+  sentiment_check, escalation
 
-**Decision Matrix for Agent Routing:**
-```
-┌────────────────────┬────────┬──────────┬───────────┬──────────┬─────────┐
-│ Signal             │ Lead   │ Campaign │ Analytics │ Pipeline │ Support │
-├────────────────────┼────────┼──────────┼───────────┼──────────┼─────────┤
-│ "lead" or "contact"│  ██    │          │           │          │         │
-│ "campaign"/"email" │        │    ██    │           │          │         │
-│ "report"/"metric"  │        │          │    ██     │          │         │
-│ "deal"/"pipeline"  │        │          │           │    ██    │         │
-│ "help"/"issue"     │        │          │           │          │   ██    │
-│ "score"/"qualify"  │  ██    │          │           │          │         │
-│ "segment"/"audience│        │    ██    │           │          │         │
-│ "forecast"/"revenue│        │          │    ██     │    ██    │         │
-│ "follow up"        │  ██    │          │           │    ██    │         │
-│ "send"/"schedule"  │        │    ██    │           │          │         │
-│ "dashboard"        │        │          │    ██     │          │         │
-└────────────────────┴────────┴──────────┴───────────┴──────────┴─────────┘
+MULTI_INTENT         -> Orchestrator decomposes, spawns multiple agents in parallel
+  "Create a campaign for all leads scored above 80"
+  -> Lead Agent (find leads) + Campaign Agent (create campaign) + Compliance Agent (verify)
 ```
 
-### 2.2 Lead Agent
+### 3.2 Lead Agent
 
-**Purpose:** Manages the entire lead lifecycle — from capture to qualification to conversion.
+**Model:** Claude Sonnet 4.5
+**Workspace:** `~/.openclaw/workspace-crm-leads`
+**Tools:** exec, read, write, browser (deny: canvas, cron)
 
 **Core Functions:**
 
-| Function | Description | Trigger |
-|----------|-------------|---------|
-| `score_lead` | Calculate lead score based on behavioral and demographic data | New contact, contact updated, periodic re-score |
-| `qualify_lead` | Determine if lead meets qualification criteria (MQL → SQL) | Score threshold reached |
-| `assign_lead` | Match lead to best-fit sales rep based on criteria | Lead qualified, round-robin, territory |
-| `enrich_contact` | Augment contact data from external sources | New contact created |
-| `suggest_followup` | Recommend next best action for a contact | Daily digest, on-demand |
-| `detect_duplicates` | Find and merge duplicate contacts | Import, new creation |
+| Function | Trigger | Actions |
+|----------|---------|---------|
+| `score_lead` | New contact, activity logged, periodic re-score | Calculate fit + intent + recency score, update via API |
+| `qualify_lead` | Score threshold crossed | Transition lifecycle stage (MQL -> SQL), assign to rep |
+| `assign_lead` | Lead qualified | Check team workload via API, assign to best-fit rep |
+| `detect_duplicates` | New contact creation | Search by email/phone/company+name, suggest merge |
+| `suggest_followup` | Daily digest, on-demand | Recommend next action based on score and activity |
+| `enrich_trigger` | New contact missing data | Spawn Enrichment Agent as sub-agent |
 
-**Lead Scoring Model:**
+**Lead Scoring Algorithm:**
+
 ```
-Score Components (0-100 total):
+Fit Score (0-50 points):
+  +15  Title contains VP/Director/C-level/CTO/CXO
+  +10  Company size > 100 employees
+  +10  Target industry match
+  +10  Budget indicated
+  +5   Geographic match
 
-Demographic Fit (0-40 points):
-  ├── Job title matches ICP           +15
-  ├── Company size in target range    +10
-  ├── Industry match                  +10
-  └── Geography match                  +5
+Intent Score (0-50 points):
+  +15  Visited pricing page
+  +10  Downloaded content / attended webinar
+  +10  Opened 3+ emails in last 30 days
+  +10  Responded to outreach
+  +5   Clicked campaign link
 
-Behavioral Signals (0-40 points):
-  ├── Email opened (last 30 days)      +5 per (max +15)
-  ├── Link clicked                     +8 per (max +16)
-  ├── Form submitted                  +10
-  ├── Meeting scheduled               +15
-  └── Website visit (tracked)          +3 per (max +9)
+Decay Rule:
+  -2 points per week of no engagement (minimum: 0)
 
-Engagement Recency (0-20 points):
-  ├── Last activity < 7 days          +20
-  ├── Last activity 7-14 days         +15
-  ├── Last activity 14-30 days        +10
-  ├── Last activity 30-60 days         +5
-  └── Last activity > 60 days          +0
-```
-
-**Agent Decision Tree:**
-```
-New Contact Created
-    │
-    ├── Score >= 80 ──► HOT LEAD
-    │   ├── Assign to top-performing rep
-    │   ├── Create urgent follow-up task
-    │   └── Notify rep via preferred channel
-    │
-    ├── Score 50-79 ──► WARM LEAD
-    │   ├── Assign to available rep (round-robin)
-    │   ├── Add to nurture campaign
-    │   └── Schedule follow-up in 3 days
-    │
-    ├── Score 20-49 ──► COLD LEAD
-    │   ├── Add to awareness campaign
-    │   └── Re-score in 14 days
-    │
-    └── Score < 20 ──► UNQUALIFIED
-        ├── Add to general newsletter
-        └── Re-score in 30 days
+Routing:
+  80-100  HOT   -> Assign to senior rep, urgent call task, Slack notify
+  60-79   WARM  -> Assign to available rep, start nurture sequence
+  40-59   COOL  -> Add to nurture campaign, re-score in 2 weeks
+  0-39    COLD  -> Add to long-term drip, re-score monthly
 ```
 
-### 2.3 Campaign Agent
+### 3.3 Campaign Agent
 
-**Purpose:** Creates, manages, optimizes, and analyzes marketing campaigns across all channels.
+**Model:** Claude Sonnet 4.5
+**Workspace:** `~/.openclaw/workspace-crm-campaigns`
+**Tools:** exec, read, write, cron (deny: browser)
 
 **Core Functions:**
 
-| Function | Description | Trigger |
-|----------|-------------|---------|
-| `create_campaign` | Build campaign from natural language description | User request |
-| `build_audience` | Create/refine audience segment from criteria | Campaign creation, user request |
-| `generate_content` | Draft email subject lines, body, CTAs | Campaign creation |
-| `optimize_send_time` | Determine best send time based on historical data | Campaign scheduling |
-| `ab_test_setup` | Configure A/B test variants | User request |
-| `analyze_performance` | Generate campaign performance report | Post-send, on-demand |
-| `suggest_improvements` | Recommend changes based on past performance | Post-campaign analysis |
+| Function | Trigger | Actions |
+|----------|---------|---------|
+| `create_campaign` | User request (natural language) | Build audience, generate content, set schedule, request compliance approval |
+| `build_audience` | Campaign creation | Create/refine segment via API |
+| `generate_content` | Campaign creation | Draft subject lines (2-3 variants), body, CTAs using MJML |
+| `optimize_send_time` | Campaign scheduling | Analyze historical open rates, recommend optimal time |
+| `ab_test_setup` | Campaign creation (auto or requested) | Create variants, set test duration, define winner criteria |
+| `ab_test_resolve` | Cron: every 30 min | Check running tests, select winner after threshold, send to remaining |
+| `analyze_performance` | Post-send, on-demand | Generate campaign report with recommendations |
+| `drip_processor` | Cron: every 15 min | Process active sequences, execute due steps |
 
 **Campaign Creation Flow (AI-Driven):**
 ```
 User: "Create a re-engagement campaign for customers who haven't
        purchased in 90 days, offer 15% discount"
-                    │
-                    ▼
-Supervisor Agent: Parse intent → Route to Campaign Agent
-                    │
-                    ▼
-Campaign Agent: Step 1 - Build Audience
-  │  Query: contacts WHERE lifecycle_stage = 'CUSTOMER'
-  │         AND last_contacted_at < (now - 90 days)
-  │  Result: 342 contacts match
-  │
-  ├── Step 2 - Generate Content
-  │  Subject A: "We miss you! Here's 15% off your next order"
-  │  Subject B: "It's been a while — come back for 15% savings"
-  │  Body: Personalized with {{first_name}}, {{last_purchase}}
-  │  CTA: "Shop Now" button
-  │
-  ├── Step 3 - Optimize Send Time
-  │  Analysis: Best open rates historically on Tuesday 10am
-  │  Recommendation: Schedule for next Tuesday at 10:00 AM
-  │
-  ├── Step 4 - Configure A/B Test
-  │  Variant A: Subject line A (50%)
-  │  Variant B: Subject line B (50%)
-  │  Winner criteria: Open rate after 4 hours
-  │
-  └── Step 5 - Present for Approval
-     "I've prepared a re-engagement campaign:
-      - Audience: 342 inactive customers (90+ days)
-      - A/B testing two subject lines
-      - Scheduled: Tuesday 10:00 AM
-      - Offer: 15% discount
-      Shall I schedule it?"
-                    │
-                    ▼
-User: "Yes, go ahead"  →  Campaign Agent: Schedule campaign
+
+Orchestrator -> Campaign Agent (sub-agent):
+
+  Step 1 - Build Audience
+    API: POST /api/v1/segments
+    Result: 342 contacts match
+
+  Step 2 - Generate Content (MJML)
+    Subject A: "We miss you! Here's 15% off your next order"
+    Subject B: "It's been a while -- come back for 15% savings"
+    Subject C: "Your 15% discount is waiting, {{first_name}}"
+    Body: Personalized with {{first_name}}, {{company}}
+    CTA: "Shop Now" button
+
+  Step 3 - Optimize Send Time
+    API: GET /api/v1/analytics/campaigns?metric=open_rate_by_hour
+    Result: Best opens historically on Tuesday 10:30 AM
+
+  Step 4 - A/B Test Config
+    15% audience per variant, winner after 4 hours by open rate
+
+Orchestrator -> Compliance Agent (sub-agent, MANDATORY):
+
+  Step 5 - Compliance Gate
+    Check: All 342 contacts have valid consent? YES
+    Check: Unsubscribe link present? YES
+    Check: Physical address in footer? YES
+    Check: Not on suppression list? 3 contacts flagged -> EXCLUDE
+    Check: DPDPA consent for Indian contacts? YES
+    APPROVED (339 contacts)
+
+Orchestrator -> User:
+  "Campaign 'Re-engagement 15%' approved & scheduled:
+   - Audience: 339 contacts (3 excluded -- suppression list)
+   - A/B testing 3 subject lines (winner at 2:30 PM)
+   - Schedule: Tuesday 10:30 AM
+   - Compliance: All checks passed
+   Shall I confirm the schedule?"
 ```
 
-### 2.4 Analytics Agent
+### 3.4 Sales Agent
 
-**Purpose:** Transforms raw data into actionable insights. Generates reports, identifies trends, detects anomalies, and proactively suggests optimizations.
+**Model:** Claude Sonnet 4.5
+**Workspace:** `~/.openclaw/workspace-crm-sales`
+**Tools:** exec, read, write, browser, canvas
+
+**Purpose:** A world-class sales coach embedded in the CRM. Not just pipeline management — active coaching, call prep, and deal strategy.
 
 **Core Functions:**
 
-| Function | Description | Trigger |
-|----------|-------------|---------|
-| `dashboard_summary` | Generate KPI overview | Daily, on-demand |
-| `pipeline_report` | Pipeline velocity, conversion rates | On-demand, weekly |
-| `campaign_performance` | Open rates, CTR, conversions | Post-campaign, on-demand |
-| `trend_analysis` | Identify patterns over time | Weekly, on-demand |
-| `anomaly_detection` | Flag unusual patterns | Continuous monitoring |
-| `revenue_forecast` | Predict revenue based on pipeline | On-demand, monthly |
-| `agent_performance` | Track AI agent effectiveness | Weekly |
+| Function | Trigger | Actions |
+|----------|---------|---------|
+| `call_prep` | User request, scheduled meeting approaching | Pull full history, generate briefing with talking points + objections |
+| `deal_coaching` | On-demand, deal risk detected | Analyze deal, suggest strategy based on similar won deals |
+| `follow_up_draft` | After call/meeting logged | Draft personalized follow-up email based on interaction notes |
+| `pipeline_overview` | On-demand | Render pipeline on Canvas with probability-weighted revenue |
+| `stale_deal_scan` | Cron: 9 AM and 3 PM weekdays | Flag stuck deals, suggest recovery actions, notify owners |
+| `daily_priorities` | Cron: 8 AM weekdays | Generate prioritized task list for each rep |
+| `forecast` | On-demand, weekly | Calculate weighted pipeline, compare to target |
+
+**Call Prep Output Example:**
+```
+Call Prep: Priya Sharma, CTO @ TechNova
+---
+Background: 200 emp, Series B, AWS/React/Kafka stack
+History: Attended AI webinar (Feb 5), opened 3 emails, demo scheduled
+Deal: $250K -- Qualification stage
+
+Key Talking Points:
+1. Reference the webinar -- she asked about streaming analytics
+2. Their stack (AWS/Kafka) aligns perfectly with our solution
+3. Competitor risk: They're also evaluating Databricks
+
+Questions to Ask:
+- What's the timeline for the analytics project?
+- Who else is involved in the decision?
+- What's the budget range?
+
+Potential Objections:
+- "We're considering Databricks" -> Highlight on-prem flexibility + cost
+- "Need to see ROI" -> Share similar customer case study (38% cost reduction)
+```
+
+### 3.5 Insight Agent (Analytics)
+
+**Model:** Claude Sonnet 4.5
+**Workspace:** `~/.openclaw/workspace-crm-insights`
+**Tools:** exec, read, canvas (deny: write, browser, cron — read-only by design)
+
+**Core Functions:**
+
+| Function | Trigger | Actions |
+|----------|---------|---------|
+| `dashboard_summary` | On-demand, daily digest | Generate KPI overview with period comparison |
+| `pipeline_analysis` | On-demand, weekly | Pipeline velocity, conversion rates, bottlenecks |
+| `campaign_performance` | Post-campaign, on-demand | Open/click/bounce rates vs benchmarks |
+| `trend_analysis` | Weekly cron | Identify patterns, seasonal effects |
+| `anomaly_detection` | Continuous monitoring | Flag unusual spikes/drops, alert relevant agents |
+| `agent_performance` | Weekly cron | Track AI agent effectiveness and accuracy |
+| `revenue_forecast` | On-demand, monthly | Probability-weighted pipeline with confidence intervals |
 
 **Proactive Alerts:**
 ```
-Analytics Agent monitors continuously and alerts when:
+Positive:
+  "Campaign 'Insurance ROI' is performing 2.3x above average -- 48% open rate!"
+  "Deal velocity improved 15% this month -- Discovery stage shortened by 2 days"
 
-📈 Positive:
-  - Campaign open rate > 2x average → "Your latest campaign is performing 2x better!"
-  - Deal velocity increased → "Deals are closing 15% faster this month"
-  - Lead score threshold → "5 new hot leads scored above 80 today"
+Negative:
+  "Email bounce rate spiked to 8% (was 2%) -- Compliance Agent notified"
+  "4 deals stuck in Proposal stage for 14+ days -- Sales Agent creating tasks"
 
-📉 Negative:
-  - Bounce rate spike → "Email bounce rate jumped to 8% (was 2%)"
-  - Pipeline stagnation → "12 deals haven't moved stages in 14+ days"
-  - Campaign underperformance → "Re-engagement campaign CTR is 50% below average"
-
-🔮 Predictive:
-  - Revenue forecast → "Based on current pipeline, projected Q1 revenue: $450K (±10%)"
-  - Churn risk → "3 customers showing disengagement signals"
-  - Capacity alert → "At current lead volume, team will be at capacity by March"
+Predictive:
+  "Based on current pipeline, projected Q1 revenue: $450K (+/-10%)"
+  "Webinar leads convert 2.3x faster -- recommend increasing webinar frequency"
+  "At current lead volume, team will be at capacity by March"
 ```
 
-### 2.5 Pipeline Agent
+### 3.6 Enrichment Agent
 
-**Purpose:** Manages deals through the sales pipeline, automates stage transitions, and provides revenue forecasting.
+**Model:** Claude Haiku 4.5 (cost-effective for high-volume lookups)
+**Workspace:** `~/.openclaw/workspace-crm-enrichment`
+**Tools:** exec, read, write, browser (deny: canvas, cron)
+
+**Purpose:** Finds and verifies contact and company data from external sources. Uses browser automation for LinkedIn and web scraping, plus API integrations.
 
 **Core Functions:**
 
-| Function | Description | Trigger |
-|----------|-------------|---------|
-| `create_deal` | Create deal from conversation or form | User request, lead qualified |
-| `move_stage` | Advance or regress deal stage | User request, criteria met |
-| `auto_transition` | Automatically move deals based on rules | Meeting completed, contract signed |
-| `forecast_revenue` | Calculate weighted pipeline value | On-demand, periodic |
-| `stale_deal_check` | Identify deals that haven't progressed | Daily check |
-| `suggest_actions` | Recommend next steps for deals | On-demand, daily digest |
-| `win_loss_analysis` | Analyze patterns in won/lost deals | Deal closed |
+| Function | Trigger | Actions |
+|----------|---------|---------|
+| `enrich_contact` | New contact created, on-demand | LinkedIn lookup, Apollo/Clearbit API, update contact |
+| `enrich_company` | New company created | Domain lookup, tech stack, employee count, funding |
+| `verify_email` | Before campaign send | Check email validity, remove invalid |
+| `batch_enrich` | Cron: 2 AM daily | Enrich up to 50 un-enriched contacts |
+| `competitor_monitor` | Weekly cron (optional) | Browser-check competitor websites for changes |
 
-**Pipeline Automation Rules:**
+**Enrichment Pipeline:**
 ```
-Rule: Auto-advance on meeting completion
-  Trigger: Activity(type=MEETING, deal_id=X) created
-  Condition: Deal.stage = "Discovery"
-  Action: Move deal to "Proposal" stage
-
-Rule: Stale deal alert
-  Trigger: Daily cron (9:00 AM)
-  Condition: Deal.updated_at > 14 days ago AND stage != won/lost
-  Action:
-    1. Notify deal owner
-    2. Create follow-up task
-    3. If no action in 7 more days → flag for manager review
-
-Rule: Auto-create deal from qualified lead
-  Trigger: Contact.lifecycle_stage changed to SQL
-  Action:
-    1. Create deal with estimated value
-    2. Assign to contact owner
-    3. Set initial stage to "Qualification"
+New Contact: "Priya Sharma, priya@technova.in"
+  |
+  +-> Browser: LinkedIn lookup -> profile, title, connections
+  +-> Apollo API: Company -> 200 employees, Series B, $5M revenue
+  +-> Clearbit API: Tech stack -> AWS, React, Python, Kafka
+  +-> Domain lookup: technova.in -> industry, location, social profiles
+  |
+  +-> API: PATCH /api/v1/contacts/{id}
+      {
+        title: "CTO",
+        customFields: {
+          linkedinUrl: "...",
+          techStack: ["AWS", "React", "Python", "Kafka"]
+        }
+      }
+  +-> API: PATCH /api/v1/companies/{id}
+      {
+        size: "MEDIUM",
+        industry: "Technology",
+        customFields: {
+          funding: "Series B",
+          revenue: "$5M",
+          techStack: ["AWS", "React", "Kafka"]
+        }
+      }
+  |
+  +-> Lead Agent notified: re-score with enriched data
+      Previous: 75 -> Updated: 85 (company size +10)
 ```
 
-### 2.6 Support Agent
+### 3.7 Compliance Agent
 
-**Purpose:** Handles inbound customer inquiries, routes tickets, suggests responses, and maintains customer satisfaction.
+**Model:** Claude Sonnet 4.5
+**Workspace:** `~/.openclaw/workspace-crm-compliance`
+**Tools:** exec, read (deny: write, browser, canvas, cron — **read-only by design**)
+
+**Purpose:** The mandatory compliance gate. No campaign sends without its approval. Has **veto power** — can block any campaign that violates compliance rules.
+
+**Why read-only?** The Compliance Agent should never modify data — only inspect and approve/reject. This prevents it from being compromised to bypass its own rules.
 
 **Core Functions:**
 
-| Function | Description | Trigger |
-|----------|-------------|---------|
-| `auto_respond` | Generate contextual response to inquiry | Inbound message |
-| `route_ticket` | Assign inquiry to appropriate team/person | New inquiry |
-| `suggest_response` | Provide response options for human agent | Inquiry received |
-| `sentiment_analysis` | Detect customer sentiment | Every interaction |
-| `escalate` | Escalate to human when needed | Low confidence, negative sentiment |
-| `update_contact` | Update contact record with interaction data | After resolution |
+| Function | Trigger | Actions |
+|----------|---------|---------|
+| `campaign_gate` | Before any campaign send (MANDATORY) | Verify consent, unsubscribe links, suppression list, regulatory compliance |
+| `consent_check` | Before adding contact to campaign | Verify opt-in status, GDPR/DPDPA consent records |
+| `weekly_audit` | Cron: Monday 6 AM | Full compliance audit of all scheduled campaigns |
+| `gdpr_request` | On-demand (data subject request) | Find all data for a contact, prepare deletion/export report |
+| `suppression_check` | Before every send | Verify contact not on suppression list |
 
-## 3. Inter-Agent Communication Protocol
+**Compliance Gate Checklist:**
+```
+For every campaign send:
+  [ ] All contacts have valid consent (opt-in date recorded)
+  [ ] Unsubscribe link present in template
+  [ ] Physical address in footer (CAN-SPAM)
+  [ ] Not on suppression/bounce list
+  [ ] DPDPA consent for Indian contacts (if applicable)
+  [ ] GDPR consent for EU contacts (if applicable)
+  [ ] Email domain has valid SPF/DKIM/DMARC
+  [ ] Bounce rate of segment < 5% (flag if higher)
+  [ ] Send volume within daily limit
 
-### Message Format
-```typescript
-interface AgentMessage {
-  id: string;                    // Unique message ID
-  from: AgentType;               // Sending agent
-  to: AgentType;                 // Target agent
-  type: 'request' | 'response' | 'event' | 'broadcast';
-  action: string;                // e.g., "find_leads", "create_campaign"
-  payload: Record<string, any>;  // Action-specific data
-  context: {
-    tenantId: string;
-    userId?: string;
-    sessionId: string;
-    conversationId: string;
-    parentMessageId?: string;    // For chained requests
-  };
-  priority: 'low' | 'normal' | 'high' | 'urgent';
-  timestamp: string;             // ISO 8601
-}
+  -> APPROVED (with exclusions noted)
+  -> REJECTED (with specific violations listed)
 ```
 
-### Communication Patterns
+### 3.8 Support Agent
 
-**1. Request-Response (Synchronous)**
-```
-Supervisor ──request──► Lead Agent
-Supervisor ◄──response── Lead Agent
-```
+**Model:** Claude Sonnet 4.5
+**Workspace:** `~/.openclaw/workspace-crm-support`
+**Tools:** exec, read, write
 
-**2. Fan-Out (Parallel)**
-```
-Supervisor ──request──► Lead Agent
-           ──request──► Campaign Agent
-           ──request──► Analytics Agent
+**Core Functions:**
 
-Supervisor ◄──response── Lead Agent
-           ◄──response── Campaign Agent
-           ◄──response── Analytics Agent
+| Function | Trigger | Actions |
+|----------|---------|---------|
+| `handle_inquiry` | Inbound customer message | Lookup contact, review history, generate contextual response |
+| `sentiment_analysis` | Every customer interaction | Detect tone, escalate if negative |
+| `auto_respond` | Inbound message matching known patterns | Generate and send response, log activity |
+| `route_ticket` | Complex or high-priority inquiry | Assign to appropriate team member |
+| `escalate` | Low confidence, angry sentiment, billing issue | Hand off to human with full context |
 
-Supervisor: Consolidate all responses → Reply to user
-```
+**Escalation Rules:**
+- Customer explicitly requests human -> escalate immediately
+- Sentiment is angry/hostile -> escalate with empathy message
+- Issue involves billing/refunds -> escalate to finance
+- 2+ failed resolution attempts -> escalate to senior support
+- Confidence below 0.5 -> escalate with explanation
 
-**3. Chain (Sequential)**
-```
-Supervisor ──request──► Lead Agent: "Find inactive customers"
-Supervisor ◄──response── Lead Agent: [342 contacts]
-Supervisor ──request──► Campaign Agent: "Create campaign for these 342"
-Supervisor ◄──response── Campaign Agent: "Campaign draft ready"
-Supervisor → User: "Campaign ready for 342 contacts. Approve?"
-```
+## 4. Agent Collaboration Patterns
 
-**4. Event-Driven (Asynchronous)**
-```
-Deal Service emits: deal.stage_changed
-  │
-  ├──► Pipeline Agent: Update forecast
-  ├──► Analytics Agent: Log metric
-  └──► Lead Agent: Update contact lifecycle stage
-```
-
-### Agent Message Bus (Redis Pub/Sub)
-```
-Channels:
-  agent:supervisor    # Supervisor inbox
-  agent:lead          # Lead Agent inbox
-  agent:campaign      # Campaign Agent inbox
-  agent:analytics     # Analytics Agent inbox
-  agent:pipeline      # Pipeline Agent inbox
-  agent:support       # Support Agent inbox
-  agent:broadcast     # All agents
-  events:domain       # Domain events (deal.created, contact.updated, etc.)
-```
-
-## 4. Agent State Management
-
-Each agent maintains state through:
-
-1. **Short-term memory** (Redis): Current conversation context, in-flight operations
-2. **Medium-term memory** (OpenClaw session): Conversation history, recent decisions
-3. **Long-term memory** (PostgreSQL + OpenClaw workspace): Historical patterns, learned preferences
+### Pattern 1: New Lead Processing Pipeline
 
 ```
-┌─────────────────────────────────────────────┐
-│ Agent Memory Architecture                    │
-│                                              │
-│  ┌──────────┐  TTL: 1 hour                  │
-│  │ Redis    │  Current conversation context  │
-│  │ (Hot)    │  In-flight operations          │
-│  └────┬─────┘  Active session data           │
-│       │                                      │
-│  ┌────▼─────┐  TTL: 30 days                 │
-│  │ OpenClaw │  Conversation history           │
-│  │ Sessions │  Recent agent decisions        │
-│  │ (Warm)   │  User preferences              │
-│  └────┬─────┘                                │
-│       │                                      │
-│  ┌────▼─────┐  Permanent                    │
-│  │PostgreSQL│  All CRM data                  │
-│  │+OpenClaw │  Agent action logs             │
-│  │ Memory   │  Learned scoring models        │
-│  │ (Cold)   │  Historical analytics          │
-│  └──────────┘                                │
-└─────────────────────────────────────────────┘
+USER: "New lead: Priya Sharma, CTO at TechNova, priya@technova.in,
+       came from our AI webinar"
+
+ORCHESTRATOR:
+  |
+  +-- 1. Spawn LEAD AGENT (sub-agent)
+  |      +-- Check duplicate -> Not found
+  |      +-- API: POST /api/v1/contacts (create)
+  |      +-- Initial score: 75 (CTO=+15, tech=+10, webinar=+5, ...)
+  |      +-- Classify as WARM
+  |
+  +-- 2. Spawn ENRICHMENT AGENT (sub-agent, PARALLEL)
+  |      +-- Browser: LinkedIn lookup -> find profile
+  |      +-- Apollo API: 200 employees, Series B, $5M revenue
+  |      +-- Clearbit API: Tech stack -> AWS, React, Python, Kafka
+  |      +-- API: PATCH /api/v1/contacts/{id} (update with enrichment)
+  |      +-- API: PATCH /api/v1/companies/{id} (create/update org)
+  |
+  +-- 3. After enrichment -> LEAD AGENT recalculates
+  |      +-- Updated score: 85 (200 emp = +10)
+  |      +-- Reclassify as HOT
+  |      +-- Assign to senior rep (Amit)
+  |
+  +-- 4. CAMPAIGN AGENT adds to "Hot Lead Fast-Track" sequence
+  |      +-- Immediate personalized welcome email scheduled
+  |
+  +-- 5. SALES AGENT creates tasks
+  |      +-- Call task for Amit (tomorrow 10 AM)
+  |      +-- Draft call prep brief
+  |
+  +-- 6. ORCHESTRATOR announces back to user:
+         "Lead created: Priya Sharma, CTO @ TechNova
+          Score: 85 (HOT) | Assigned to: Amit
+          Enriched: 200 emp, Series B, AWS/React stack
+          Actions: Welcome email queued, call task created for tomorrow"
 ```
 
-## 5. Error Handling & Fallback Strategy
+### Pattern 2: Campaign Launch with Compliance Gate
 
 ```
-Agent encounters error
-    │
-    ├── Retry (transient error: API timeout, rate limit)
-    │   └── Max 3 retries with exponential backoff
-    │
-    ├── Fallback to alternative (model unavailable)
-    │   └── Claude → GPT → DeepSeek (model failover)
-    │
-    ├── Partial result (some data unavailable)
-    │   └── Return what's available + note gaps
-    │
-    ├── Escalate to Supervisor (agent can't handle)
-    │   └── Supervisor tries alternative agent or approach
-    │
-    └── Human handoff (all agents fail or low confidence)
-        └── "I'm not confident in my answer. Let me
-             connect you with a team member."
+USER: "Launch email campaign 'Q1 Upsell' to all customers with
+       deal value > $100K, send tomorrow 10 AM"
+
+ORCHESTRATOR:
+  |
+  +-- 1. CAMPAIGN AGENT
+  |      +-- API: POST /api/v1/segments (create segment)
+  |      +-- Query segment: 47 contacts match
+  |      +-- Generate email (3 subject line variants for A/B)
+  |      +-- Set schedule: tomorrow 10 AM
+  |      +-- Status: PENDING_COMPLIANCE
+  |
+  +-- 2. COMPLIANCE AGENT (automatic gate -- MANDATORY)
+  |      +-- Check: All 47 contacts have valid consent? YES
+  |      +-- Check: Unsubscribe link present? YES
+  |      +-- Check: Physical address in footer? YES
+  |      +-- Check: Not on suppression list? YES
+  |      +-- Check: DPDPA consent for Indian contacts? YES
+  |      +-- Flag: 3 contacts have bounced emails -> EXCLUDE
+  |      +-- APPROVED (44 contacts)
+  |
+  +-- 3. CAMPAIGN AGENT updates
+  |      +-- Exclude 3 bounced contacts
+  |      +-- Schedule confirmed: 44 contacts, tomorrow 10 AM
+  |      +-- A/B test: 15% per variant, winner at 2 PM
+  |
+  +-- 4. ORCHESTRATOR announces:
+         "Campaign 'Q1 Upsell' approved & scheduled
+          Audience: 44 contacts (3 excluded -- bounced emails)
+          Schedule: Tomorrow 10 AM
+          A/B Test: 3 subject lines, winner selected at 2 PM
+          Compliance: All checks passed"
 ```
 
-## 6. Agent Confidence Scoring
+### Pattern 3: Proactive Deal Risk Alert (Cron-Triggered)
+
+```
+CRON (9 AM Monday) -> SALES AGENT activates
+
+SALES AGENT:
+  +-- API: GET /api/v1/deals?stale=true&staleDays=7
+  |
+  +-- Found 3 at-risk deals:
+  |   +-- Deal #34: "Acme Data Hub" -- $450K -- Proposal -- 12 days stale
+  |   +-- Deal #52: "Beta Analytics" -- $280K -- Negotiation -- 9 days stale
+  |   +-- Deal #67: "Gamma AI Platform" -- $1.2M -- Qualification -- 8 days stale
+  |
+  +-- For each deal:
+  |   +-- Analyze last interactions via API
+  |   +-- Generate recommended next action
+  |   +-- Draft re-engagement message
+  |
+  +-- Send to Slack #deal-alerts:
+      "3 deals need attention this morning:
+
+       [!] Acme Data Hub ($450K) -- Silent 12 days in Proposal
+           Suggest: Send updated ROI analysis, offer pilot discount
+
+       [!] Beta Analytics ($280K) -- 9 days in Negotiation
+           Suggest: Call procurement contact, address pricing concern
+
+       [!] Gamma AI Platform ($1.2M) -- 8 days in Qualification
+           Suggest: Schedule technical demo with their VP Eng
+
+       Reply with deal # to get full prep brief."
+```
+
+### Pattern 4: Fan-Out (Parallel Agent Execution)
+
+```
+USER: "Give me a full status update"
+
+ORCHESTRATOR spawns ALL agents in parallel:
+  |
+  +-- LEAD AGENT:     "5 new leads today, 2 HOT"
+  +-- SALES AGENT:    "Pipeline: $2.4M, 3 deals at risk"
+  +-- CAMPAIGN AGENT: "2 campaigns active, 'Q1 Nurture' at 42% open rate"
+  +-- INSIGHT AGENT:  "Revenue up 15% MoM, conversion rate improving"
+  +-- SUPPORT AGENT:  "3 open tickets, avg response time: 12 min"
+  |
+  ORCHESTRATOR consolidates:
+  "Here's your full status:
+
+   Leads: 5 new today (2 HOT -- assigned to Amit and Sarah)
+   Pipeline: $2.4M across 28 deals (3 at risk -- stale >7 days)
+   Campaigns: 2 active ('Q1 Nurture': 42% open rate, 'Product Launch': sending)
+   Revenue: Up 15% month-over-month, conversion rate: 23% (+3%)
+   Support: 3 open tickets, avg response: 12 min
+
+   Top priority: Deal #34 (Acme, $450K) has been silent 12 days.
+   Want me to prep a recovery strategy?"
+```
+
+## 5. Agent State & Memory
+
+```
++-----------------------------------------------+
+| Agent Memory Architecture                      |
+|                                                |
+|  +------------+  TTL: 1 hour                   |
+|  | Redis      |  Current conversation context  |
+|  | (Hot)      |  In-flight operations           |
+|  +-----+------+  Active session data            |
+|        |                                        |
+|  +-----v------+  TTL: 30 days                  |
+|  | OpenClaw   |  Conversation history           |
+|  | Sessions   |  Recent agent decisions         |
+|  | (Warm)     |  User preferences per rep       |
+|  +-----+------+  Compaction: safeguard mode     |
+|        |                                        |
+|  +-----v------+  Permanent                     |
+|  | PostgreSQL |  All CRM data                   |
+|  | + pgvector |  Agent action logs              |
+|  | + OpenClaw |  Embeddings for semantic search  |
+|  | Memory     |  Historical analytics           |
+|  | (Cold)     |                                  |
+|  +------------+                                 |
++-----------------------------------------------+
+```
+
+## 6. Confidence Scoring & Human Handoff
 
 Every agent response includes a confidence score:
 
 ```typescript
 interface AgentResponse {
   result: any;
-  confidence: number;        // 0.0 - 1.0
-  reasoning: string;         // Explanation of the decision
-  alternatives?: any[];      // Alternative suggestions
-  needsHumanReview: boolean; // Flag for uncertain decisions
+  confidence: number;         // 0.0 - 1.0
+  reasoning: string;          // Why this decision was made
+  alternatives?: any[];       // Other options considered
+  needsHumanReview: boolean;
 }
 ```
 
-**Confidence thresholds:**
-- `>= 0.9` — Execute automatically
-- `0.7 - 0.9` — Execute with notification to user
-- `0.5 - 0.7` — Present options to user for decision
-- `< 0.5` — Escalate to human
+| Confidence | Action |
+|-----------|--------|
+| >= 0.9 | Execute automatically |
+| 0.7 - 0.9 | Execute with notification to user |
+| 0.5 - 0.7 | Present options for user decision |
+| < 0.5 | Escalate to human with context |
 
-## 7. Security & Guardrails
+## 7. Error Handling & Fallback
 
-### Agent Permissions (Per Tenant)
-```typescript
-interface AgentPermissions {
-  canCreateContacts: boolean;
-  canDeleteContacts: boolean;     // Default: false
-  canSendCampaigns: boolean;
-  canModifyDeals: boolean;
-  canAccessFinancials: boolean;
-  maxCampaignSize: number;        // Max recipients per campaign
-  requireApprovalForSend: boolean;// Campaign send requires human OK
-  maxDailyEmails: number;         // Rate limit
-  allowedChannels: string[];      // Which messaging channels
-}
 ```
+Agent encounters error
+    |
+    +-- Retry (transient: API timeout, rate limit)
+    |   Max 3 retries with exponential backoff
+    |
+    +-- Model fallback (primary model unavailable)
+    |   Claude Sonnet -> GPT-4o -> DeepSeek (configurable chain)
+    |
+    +-- Partial result (some data unavailable)
+    |   Return what's available, note gaps
+    |
+    +-- Escalate to Orchestrator (agent can't handle)
+    |   Orchestrator tries alternative agent or approach
+    |
+    +-- Human handoff (all agents fail or low confidence)
+        "I'm not confident in my answer. Connecting you
+         with a team member. Here's the context: [...]"
+```
+
+## 8. Agent Security & Guardrails
+
+### Per-Agent Tool Policies
+
+| Agent | read | write | exec | browser | canvas | cron |
+|-------|------|-------|------|---------|--------|------|
+| Orchestrator | Y | Y | Y | Y | Y | Y |
+| Lead Agent | Y | Y | Y | Y | N | N |
+| Campaign Agent | Y | Y | Y | N | N | Y |
+| Sales Agent | Y | Y | Y | Y | Y | N |
+| Insight Agent | Y | N | Y | N | Y | N |
+| Enrichment Agent | Y | Y | Y | Y | N | N |
+| **Compliance Agent** | **Y** | **N** | **Y** | **N** | **N** | **N** |
+| Support Agent | Y | Y | Y | N | N | N |
+
+**Key principle:** Compliance Agent is read-only by design — it can never modify data, only inspect and approve/reject.
 
 ### Guardrails
-1. **No unsupervised campaign sends** — All campaigns require human approval (configurable)
+
+1. **No unsupervised campaign sends** — Compliance Agent approval mandatory
 2. **No bulk deletes** — Agents can never bulk-delete contacts or deals
-3. **Rate limits** — Per-agent, per-tenant action limits
-4. **Audit trail** — Every agent action logged in `AgentActionLog`
-5. **Content moderation** — AI-generated campaign content reviewed before send
-6. **PII protection** — Agents never expose raw PII in logs or to unauthorized channels
+3. **No raw SQL** — All data access through the authenticated API
+4. **Rate limits** — Per-agent, per-tenant action limits
+5. **Audit trail** — Every agent action logged in AgentActionLog
+6. **Content moderation** — AI-generated campaign content reviewed before send
+7. **PII protection** — Agents never expose raw PII in logs or cross-tenant
+8. **Prompt injection defense** — User-provided data sanitized before agent processing
+9. **Token budgets** — Per-agent daily token limits to prevent cost overruns
+10. **Sandbox mode** — Non-main sessions run in Docker sandboxes

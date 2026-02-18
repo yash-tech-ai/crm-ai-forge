@@ -1,300 +1,55 @@
 # Database Schema & ERD
 
-## Entity Relationship Diagram
+## Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| ORM | **Prisma** | Type-safe queries, auto-migrations, tenant middleware — agents NEVER run raw SQL |
+| Multi-tenancy | **tenant_id from Day 1** | Every table has tenant_id; retrofitting is extremely painful |
+| Vector search | **pgvector extension** | Semantic search without extra infra ("find contacts like our best customer") |
+| Consent tracking | **Dedicated fields** | GDPR/DPDPA/CAN-SPAM compliance built into the data model |
+| Enrichment data | **JSONB fields** | Flexible storage for varying enrichment sources |
+| Drip campaigns | **Sequences + Enrollments** | Proper state machine for multi-step automation |
+| Soft deletes | **deletedAt timestamp** | Never lose data; support GDPR "right to erasure" with audit trail |
+| Custom fields | **JSONB** | Per-tenant extensibility without schema changes |
+
+## Entity Relationship Overview
 
 ```
-┌──────────────┐       ┌──────────────┐       ┌──────────────┐
-│   Tenant     │       │    User      │       │    Role      │
-├──────────────┤       ├──────────────┤       ├──────────────┤
-│ id (PK)      │──┐    │ id (PK)      │       │ id (PK)      │
-│ name         │  │    │ tenant_id(FK)│◄──┐   │ name         │
-│ slug         │  │    │ email        │   │   │ permissions  │
-│ plan         │  │    │ password_hash│   │   └──────┬───────┘
-│ settings     │  │    │ name         │   │          │
-│ created_at   │  │    │ role_id (FK) │───┘──────────┘
-│ updated_at   │  │    │ avatar_url   │
-└──────────────┘  │    │ is_active    │
-                  │    │ last_login_at│
-                  │    │ created_at   │
-                  │    └──────┬───────┘
-                  │           │
-                  │    ┌──────┼──────────────────────────────┐
-                  │    │      │                               │
-                  │    │      │ (assigned_to)                 │
-                  ▼    ▼      ▼                               │
-┌──────────────────────────────────────┐                     │
-│              Contact                  │                     │
-├──────────────────────────────────────┤                     │
-│ id (PK)                              │                     │
-│ tenant_id (FK) ──────────────────────│─► Tenant            │
-│ company_id (FK, nullable) ───────────│─► Company           │
-│ owner_id (FK, nullable) ─────────────│─► User              │
-│ first_name                           │                     │
-│ last_name                            │                     │
-│ email (unique per tenant)            │                     │
-│ phone                                │                     │
-│ title                                │                     │
-│ source (enum)                        │                     │
-│ status (enum: active/inactive/...)   │                     │
-│ lead_score (0-100)                   │                     │
-│ lifecycle_stage (enum)               │                     │
-│ tags (text[])                        │                     │
-│ custom_fields (jsonb)                │                     │
-│ last_contacted_at                    │                     │
-│ created_at                           │                     │
-│ updated_at                           │                     │
-└───────────┬──────────────────────────┘                     │
-            │                                                 │
-            │ 1:N                                             │
-            ▼                                                 │
-┌──────────────────────┐    ┌──────────────────────┐         │
-│   Activity           │    │    Note               │         │
-├──────────────────────┤    ├──────────────────────┤         │
-│ id (PK)              │    │ id (PK)              │         │
-│ tenant_id (FK)       │    │ tenant_id (FK)       │         │
-│ contact_id (FK)      │    │ contact_id (FK)      │         │
-│ user_id (FK)         │    │ user_id (FK)         │         │
-│ type (enum)          │    │ body (text)          │         │
-│ description          │    │ created_at           │         │
-│ metadata (jsonb)     │    └──────────────────────┘         │
-│ created_at           │                                      │
-└──────────────────────┘                                      │
-                                                              │
-┌──────────────────────┐                                      │
-│   Company            │                                      │
-├──────────────────────┤                                      │
-│ id (PK)              │                                      │
-│ tenant_id (FK)       │                                      │
-│ owner_id (FK) ───────│──────────────────────────────────────┘
-│ name                 │
-│ domain               │
-│ industry             │
-│ size (enum)          │
-│ phone                │
-│ address (jsonb)      │
-│ website              │
-│ tags (text[])        │
-│ custom_fields (jsonb)│
-│ created_at           │
-│ updated_at           │
-└──────────┬───────────┘
-           │
-           │ 1:N (contacts)
-           ▼
-
-┌──────────────────────────────────────────────────────────────┐
-│                      DEAL PIPELINE                            │
-└──────────────────────────────────────────────────────────────┘
-
-┌──────────────────────┐       ┌──────────────────────┐
-│   Pipeline           │       │   Pipeline Stage     │
-├──────────────────────┤       ├──────────────────────┤
-│ id (PK)              │──┐    │ id (PK)              │
-│ tenant_id (FK)       │  │    │ pipeline_id (FK) ────│──► Pipeline
-│ name                 │  │    │ name                 │
-│ is_default           │  │    │ position (int)       │
-│ created_at           │  │    │ probability (0-100)  │
-│ updated_at           │  │    │ is_won               │
-└──────────────────────┘  │    │ is_lost              │
-                          │    │ created_at           │
-                          │    └──────────┬───────────┘
-                          │               │
-                          │               │ 1:N (deals in stage)
-                          │               ▼
-                          │    ┌──────────────────────┐
-                          │    │   Deal               │
-                          │    ├──────────────────────┤
-                          │    │ id (PK)              │
-                          │    │ tenant_id (FK)       │
-                          └────│ pipeline_id (FK)     │
-                               │ stage_id (FK) ───────│──► PipelineStage
-                               │ contact_id (FK) ─────│──► Contact
-                               │ company_id (FK) ─────│──► Company
-                               │ owner_id (FK) ───────│──► User
-                               │ title                │
-                               │ value (decimal)      │
-                               │ currency (char(3))   │
-                               │ expected_close_date  │
-                               │ actual_close_date    │
-                               │ probability (0-100)  │
-                               │ lost_reason          │
-                               │ tags (text[])        │
-                               │ custom_fields (jsonb)│
-                               │ created_at           │
-                               │ updated_at           │
-                               └──────────────────────┘
-
-┌──────────────────────────────────────────────────────────────┐
-│                    CAMPAIGN ENGINE                             │
-└──────────────────────────────────────────────────────────────┘
-
-┌──────────────────────┐       ┌──────────────────────────────┐
-│  Email Template      │       │  Audience Segment            │
-├──────────────────────┤       ├──────────────────────────────┤
-│ id (PK)              │       │ id (PK)                      │
-│ tenant_id (FK)       │       │ tenant_id (FK)               │
-│ name                 │       │ name                         │
-│ subject              │       │ description                  │
-│ html_body            │       │ type (static/dynamic)        │
-│ text_body            │       │ filter_criteria (jsonb)      │
-│ variables (text[])   │       │ contact_count (cached int)   │
-│ category             │       │ last_computed_at             │
-│ thumbnail_url        │       │ created_at                   │
-│ created_at           │       │ updated_at                   │
-│ updated_at           │       └──────────────┬───────────────┘
-└──────────┬───────────┘                      │
-           │                                   │
-           │                                   │
-           ▼                                   ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     Campaign                                 │
-├─────────────────────────────────────────────────────────────┤
-│ id (PK)                                                      │
-│ tenant_id (FK)                                               │
-│ created_by_id (FK) ──► User                                  │
-│ template_id (FK) ──► EmailTemplate                           │
-│ segment_id (FK) ──► AudienceSegment                          │
-│ name                                                         │
-│ type (enum: email, sms, whatsapp, multi_channel)             │
-│ status (enum: draft, scheduled, sending, sent, paused, ...)  │
-│ subject_line                                                 │
-│ preview_text                                                 │
-│ from_name                                                    │
-│ from_email                                                   │
-│ reply_to                                                     │
-│ scheduled_at                                                 │
-│ sent_at                                                      │
-│ completed_at                                                 │
-│ ab_test_config (jsonb, nullable)                             │
-│ settings (jsonb)                                             │
-│ created_at                                                   │
-│ updated_at                                                   │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-                      │ 1:N
-                      ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Campaign Recipient                          │
-├─────────────────────────────────────────────────────────────┤
-│ id (PK)                                                      │
-│ campaign_id (FK) ──► Campaign                                │
-│ contact_id (FK) ──► Contact                                  │
-│ email                                                        │
-│ status (enum: pending, sent, delivered, bounced, failed)     │
-│ sent_at                                                      │
-│ delivered_at                                                 │
-│ opened_at                                                    │
-│ clicked_at                                                   │
-│ bounced_at                                                   │
-│ unsubscribed_at                                              │
-│ open_count (int)                                             │
-│ click_count (int)                                            │
-│ metadata (jsonb)                                             │
-│ created_at                                                   │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                  Campaign Link Click                         │
-├─────────────────────────────────────────────────────────────┤
-│ id (PK)                                                      │
-│ campaign_id (FK) ──► Campaign                                │
-│ recipient_id (FK) ──► CampaignRecipient                      │
-│ url                                                          │
-│ clicked_at                                                   │
-│ user_agent                                                   │
-│ ip_address                                                   │
-└─────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────┐
-│                       TASKS & AUTOMATION                      │
-└──────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                       Task                                   │
-├─────────────────────────────────────────────────────────────┤
-│ id (PK)                                                      │
-│ tenant_id (FK)                                               │
-│ assigned_to_id (FK) ──► User                                 │
-│ created_by_id (FK) ──► User                                  │
-│ contact_id (FK, nullable) ──► Contact                        │
-│ deal_id (FK, nullable) ──► Deal                              │
-│ title                                                        │
-│ description                                                  │
-│ type (enum: call, email, meeting, follow_up, custom)         │
-│ priority (enum: low, medium, high, urgent)                   │
-│ status (enum: pending, in_progress, completed, cancelled)    │
-│ due_date                                                     │
-│ completed_at                                                 │
-│ created_by_agent (boolean) -- was this created by an AI agent│
-│ agent_id (string, nullable) -- which agent created it        │
-│ created_at                                                   │
-│ updated_at                                                   │
-└─────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────┐
-│                    AGENT TRACKING                             │
-└──────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                   Agent Action Log                            │
-├─────────────────────────────────────────────────────────────┤
-│ id (PK)                                                      │
-│ tenant_id (FK)                                               │
-│ agent_type (enum: supervisor, lead, campaign, analytics,     │
-│             pipeline, support)                                │
-│ action (string)                                              │
-│ input (jsonb)                                                │
-│ output (jsonb)                                               │
-│ status (enum: started, completed, failed)                    │
-│ duration_ms (int)                                            │
-│ triggered_by (enum: user, agent, schedule, event)            │
-│ parent_action_id (FK, nullable, self-ref) -- for chained     │
-│ error (text, nullable)                                       │
-│ created_at                                                   │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│               Automation Workflow                             │
-├─────────────────────────────────────────────────────────────┤
-│ id (PK)                                                      │
-│ tenant_id (FK)                                               │
-│ name                                                         │
-│ description                                                  │
-│ trigger_type (enum: event, schedule, manual)                 │
-│ trigger_config (jsonb)                                       │
-│ actions (jsonb[]) -- ordered list of actions                 │
-│ is_active (boolean)                                          │
-│ last_run_at                                                  │
-│ run_count (int)                                              │
-│ created_at                                                   │
-│ updated_at                                                   │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│              Unsubscribe                                     │
-├─────────────────────────────────────────────────────────────┤
-│ id (PK)                                                      │
-│ tenant_id (FK)                                               │
-│ contact_id (FK) ──► Contact                                  │
-│ campaign_id (FK, nullable) ──► Campaign                      │
-│ email                                                        │
-│ reason (text, nullable)                                      │
-│ created_at                                                   │
-└─────────────────────────────────────────────────────────────┘
+Tenant
+  |-- User (roles: admin, manager, member)
+  |-- Contact --- Activity, Note, Task
+  |     |-- Company (many contacts per company)
+  |     |-- Deal (through pipeline stages)
+  |     |-- CampaignRecipient (campaign sends)
+  |     |-- SequenceEnrollment (drip campaigns)
+  |     |-- Unsubscribe (opt-out tracking)
+  |
+  |-- Pipeline --- PipelineStage --- Deal
+  |
+  |-- Campaign --- CampaignRecipient --- CampaignLinkClick
+  |     |-- EmailTemplate
+  |     |-- AudienceSegment
+  |
+  |-- AutomationSequence --- SequenceEnrollment
+  |
+  |-- AgentActionLog (hierarchical: parent-child chains)
+  |
+  |-- AutomationWorkflow (event-driven triggers)
 ```
 
 ## Prisma Schema
 
 ```prisma
-// schema.prisma
-
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector"), pg_trgm]
 }
 
 // ─── ENUMS ──────────────────────────────────────────────
@@ -307,15 +62,19 @@ enum ContactSource {
   SOCIAL_MEDIA
   COLD_OUTREACH
   CAMPAIGN
+  WEBINAR
+  LINKEDIN
   AGENT
   OTHER
 }
 
 enum ContactStatus {
+  NEW
   ACTIVE
   INACTIVE
   UNSUBSCRIBED
   BOUNCED
+  CHURNED
   ARCHIVED
 }
 
@@ -329,6 +88,13 @@ enum LifecycleStage {
   EVANGELIST
 }
 
+enum ConsentStatus {
+  PENDING
+  OPTED_IN
+  OPTED_OUT
+  WITHDRAWN
+}
+
 enum CompanySize {
   SOLO
   SMALL        // 2-10
@@ -336,16 +102,6 @@ enum CompanySize {
   LARGE        // 51-200
   ENTERPRISE   // 201-1000
   CORPORATION  // 1000+
-}
-
-enum DealCurrency {
-  USD
-  EUR
-  GBP
-  INR
-  JPY
-  AUD
-  CAD
 }
 
 enum CampaignType {
@@ -357,6 +113,7 @@ enum CampaignType {
 
 enum CampaignStatus {
   DRAFT
+  PENDING_COMPLIANCE
   SCHEDULED
   SENDING
   SENT
@@ -365,12 +122,21 @@ enum CampaignStatus {
   FAILED
 }
 
-enum RecipientStatus {
+enum ComplianceStatus {
   PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RecipientStatus {
+  QUEUED
   SENT
   DELIVERED
+  OPENED
+  CLICKED
   BOUNCED
   FAILED
+  UNSUBSCRIBED
 }
 
 enum TaskType {
@@ -378,6 +144,7 @@ enum TaskType {
   EMAIL
   MEETING
   FOLLOW_UP
+  DEMO
   CUSTOM
 }
 
@@ -398,6 +165,8 @@ enum TaskStatus {
 enum ActivityType {
   EMAIL_SENT
   EMAIL_RECEIVED
+  EMAIL_OPENED
+  EMAIL_CLICKED
   CALL_MADE
   CALL_RECEIVED
   MEETING
@@ -414,26 +183,30 @@ enum ActivityType {
   AGENT_ACTION
   CONTACT_CREATED
   CONTACT_UPDATED
+  ENRICHMENT_COMPLETED
 }
 
 enum AgentType {
-  SUPERVISOR
+  ORCHESTRATOR
   LEAD
   CAMPAIGN
-  ANALYTICS
-  PIPELINE
+  SALES
+  INSIGHT
+  ENRICHMENT
+  COMPLIANCE
   SUPPORT
-}
-
-enum TriggerType {
-  EVENT
-  SCHEDULE
-  MANUAL
 }
 
 enum SegmentType {
   STATIC
   DYNAMIC
+}
+
+enum SequenceStatus {
+  ACTIVE
+  COMPLETED
+  EXITED
+  PAUSED
 }
 
 // ─── MODELS ─────────────────────────────────────────────
@@ -442,25 +215,26 @@ model Tenant {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
-  plan      String   @default("free") // free, starter, pro, enterprise
+  plan      String   @default("free") // free, starter, growth, enterprise
   settings  Json     @default("{}")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users               User[]
-  contacts            Contact[]
-  companies           Company[]
-  deals               Deal[]
-  pipelines           Pipeline[]
-  campaigns           Campaign[]
-  emailTemplates      EmailTemplate[]
-  audienceSegments    AudienceSegment[]
-  tasks               Task[]
-  activities          Activity[]
-  notes               Note[]
-  agentActionLogs     AgentActionLog[]
-  automationWorkflows AutomationWorkflow[]
-  unsubscribes        Unsubscribe[]
+  users                User[]
+  contacts             Contact[]
+  companies            Company[]
+  deals                Deal[]
+  pipelines            Pipeline[]
+  campaigns            Campaign[]
+  emailTemplates       EmailTemplate[]
+  audienceSegments     AudienceSegment[]
+  tasks                Task[]
+  activities           Activity[]
+  notes                Note[]
+  agentActionLogs      AgentActionLog[]
+  automationWorkflows  AutomationWorkflow[]
+  automationSequences  AutomationSequence[]
+  unsubscribes         Unsubscribe[]
 
   @@map("tenants")
 }
@@ -494,58 +268,88 @@ model User {
 }
 
 model Contact {
-  id              String          @id @default(cuid())
-  tenantId        String          @map("tenant_id")
-  companyId       String?         @map("company_id")
-  ownerId         String?         @map("owner_id")
-  firstName       String          @map("first_name")
-  lastName        String          @map("last_name")
-  email           String
-  phone           String?
-  title           String?
-  source          ContactSource   @default(OTHER)
-  status          ContactStatus   @default(ACTIVE)
-  leadScore       Int             @default(0) @map("lead_score")
-  lifecycleStage  LifecycleStage  @default(SUBSCRIBER) @map("lifecycle_stage")
-  tags            String[]        @default([])
-  customFields    Json            @default("{}") @map("custom_fields")
-  lastContactedAt DateTime?       @map("last_contacted_at")
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @updatedAt @map("updated_at")
+  id               String          @id @default(cuid())
+  tenantId         String          @map("tenant_id")
+  companyId        String?         @map("company_id")
+  ownerId          String?         @map("owner_id")
+  firstName        String          @map("first_name")
+  lastName         String          @map("last_name")
+  email            String
+  phone            String?
+  title            String?
+  department       String?
+  source           ContactSource   @default(OTHER)
+  status           ContactStatus   @default(NEW)
+  leadScore        Int             @default(0) @map("lead_score")
+  lifecycleStage   LifecycleStage  @default(SUBSCRIBER) @map("lifecycle_stage")
+  tags             String[]        @default([])
+  customFields     Json            @default("{}") @map("custom_fields")
 
-  tenant              Tenant              @relation(fields: [tenantId], references: [id])
-  company             Company?            @relation(fields: [companyId], references: [id])
-  owner               User?               @relation("ContactOwner", fields: [ownerId], references: [id])
-  deals               Deal[]
-  activities          Activity[]
-  notes               Note[]
-  tasks               Task[]
-  campaignRecipients  CampaignRecipient[]
-  unsubscribes        Unsubscribe[]
+  // Consent tracking (GDPR/DPDPA/CAN-SPAM)
+  consentStatus    ConsentStatus   @default(PENDING) @map("consent_status")
+  consentDate      DateTime?       @map("consent_date")
+  consentSource    String?         @map("consent_source") // "web_form", "import", "verbal"
+
+  // Enrichment tracking
+  enrichedAt       DateTime?       @map("enriched_at")
+  enrichmentData   Json            @default("{}") @map("enrichment_data")
+
+  // Engagement timestamps
+  lastContactedAt  DateTime?       @map("last_contacted_at")
+  lastEngagedAt    DateTime?       @map("last_engaged_at") // last action THEY took
+
+  // Vector embedding for semantic search
+  // embedding     Unsupported("vector(1536)")? // enable when pgvector is configured
+
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  deletedAt        DateTime?       @map("deleted_at")
+
+  tenant               Tenant              @relation(fields: [tenantId], references: [id])
+  company              Company?            @relation(fields: [companyId], references: [id])
+  owner                User?               @relation("ContactOwner", fields: [ownerId], references: [id])
+  deals                Deal[]
+  activities           Activity[]
+  notes                Note[]
+  tasks                Task[]
+  campaignRecipients   CampaignRecipient[]
+  sequenceEnrollments  SequenceEnrollment[]
+  unsubscribes         Unsubscribe[]
 
   @@unique([tenantId, email])
-  @@index([tenantId, leadScore])
+  @@index([tenantId, leadScore(sort: Desc)])
   @@index([tenantId, lifecycleStage])
   @@index([tenantId, status])
   @@index([tenantId, createdAt])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, lastEngagedAt])
   @@map("contacts")
 }
 
 model Company {
-  id           String       @id @default(cuid())
-  tenantId     String       @map("tenant_id")
-  ownerId      String?      @map("owner_id")
-  name         String
-  domain       String?
-  industry     String?
-  size         CompanySize?
-  phone        String?
-  address      Json?
-  website      String?
-  tags         String[]     @default([])
-  customFields Json         @default("{}") @map("custom_fields")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
+  id              String       @id @default(cuid())
+  tenantId        String       @map("tenant_id")
+  ownerId         String?      @map("owner_id")
+  name            String
+  domain          String?
+  industry        String?
+  size            CompanySize?
+  employeeCount   Int?         @map("employee_count")
+  revenueRange    String?      @map("revenue_range")
+  phone           String?
+  address         Json?
+  website         String?
+  country         String?
+  city            String?
+  tags            String[]     @default([])
+  customFields    Json         @default("{}") @map("custom_fields")
+  techStack       String[]     @default([]) @map("tech_stack")
+  socialProfiles  Json         @default("{}") @map("social_profiles")
+  enrichmentData  Json         @default("{}") @map("enrichment_data")
+  enrichedAt      DateTime?    @map("enriched_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  deletedAt       DateTime?    @map("deleted_at")
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id])
   owner    User?     @relation("CompanyOwner", fields: [ownerId], references: [id])
@@ -572,13 +376,13 @@ model Pipeline {
 }
 
 model PipelineStage {
-  id          String  @id @default(cuid())
-  pipelineId  String  @map("pipeline_id")
+  id          String   @id @default(cuid())
+  pipelineId  String   @map("pipeline_id")
   name        String
   position    Int
-  probability Int     @default(0) // 0-100
-  isWon       Boolean @default(false) @map("is_won")
-  isLost      Boolean @default(false) @map("is_lost")
+  probability Int      @default(0) // 0-100
+  isWon       Boolean  @default(false) @map("is_won")
+  isLost      Boolean  @default(false) @map("is_lost")
   createdAt   DateTime @default(now()) @map("created_at")
 
   pipeline Pipeline @relation(fields: [pipelineId], references: [id])
@@ -601,12 +405,16 @@ model Deal {
   currency          String    @default("USD")
   expectedCloseDate DateTime? @map("expected_close_date")
   actualCloseDate   DateTime? @map("actual_close_date")
-  probability       Int       @default(0) // 0-100
+  probability       Int       @default(0)
   lostReason        String?   @map("lost_reason")
+  competitor        String?
+  notes             String?
   tags              String[]  @default([])
   customFields      Json      @default("{}") @map("custom_fields")
+  stageChangedAt    DateTime  @default(now()) @map("stage_changed_at")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
+  deletedAt         DateTime? @map("deleted_at")
 
   tenant   Tenant         @relation(fields: [tenantId], references: [id])
   pipeline Pipeline       @relation(fields: [pipelineId], references: [id])
@@ -619,6 +427,7 @@ model Deal {
   @@index([tenantId, stageId])
   @@index([tenantId, ownerId])
   @@index([tenantId, expectedCloseDate])
+  @@index([tenantId, stageChangedAt])
   @@map("deals")
 }
 
@@ -628,10 +437,13 @@ model EmailTemplate {
   name         String
   subject      String
   htmlBody     String   @map("html_body")
-  textBody     String?  @map("text_body")
+  mjmlBody     String?  @map("mjml_body") // source MJML for editing
+  textBody     String?  @map("text_body") // plain text fallback
   variables    String[] @default([])
   category     String?
+  tags         String[] @default([])
   thumbnailUrl String?  @map("thumbnail_url")
+  performance  Json     @default("{}") // historical open/click rates
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -660,26 +472,36 @@ model AudienceSegment {
 }
 
 model Campaign {
-  id            String         @id @default(cuid())
-  tenantId      String         @map("tenant_id")
-  createdById   String         @map("created_by_id")
-  templateId    String?        @map("template_id")
-  segmentId     String?        @map("segment_id")
-  name          String
-  type          CampaignType   @default(EMAIL)
-  status        CampaignStatus @default(DRAFT)
-  subjectLine   String?        @map("subject_line")
-  previewText   String?        @map("preview_text")
-  fromName      String?        @map("from_name")
-  fromEmail     String?        @map("from_email")
-  replyTo       String?        @map("reply_to")
-  scheduledAt   DateTime?      @map("scheduled_at")
-  sentAt        DateTime?      @map("sent_at")
-  completedAt   DateTime?      @map("completed_at")
-  abTestConfig  Json?          @map("ab_test_config")
-  settings      Json           @default("{}") @map("settings")
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
+  id               String           @id @default(cuid())
+  tenantId         String           @map("tenant_id")
+  createdById      String           @map("created_by_id")
+  templateId       String?          @map("template_id")
+  segmentId        String?          @map("segment_id")
+  name             String
+  type             CampaignType     @default(EMAIL)
+  status           CampaignStatus   @default(DRAFT)
+  objective        String?          // awareness, nurture, convert, retain
+  subjectLine      String?          @map("subject_line")
+  previewText      String?          @map("preview_text")
+  fromName         String?          @map("from_name")
+  fromEmail        String?          @map("from_email")
+  replyTo          String?          @map("reply_to")
+  scheduledAt      DateTime?        @map("scheduled_at")
+  sentAt           DateTime?        @map("sent_at")
+  completedAt      DateTime?        @map("completed_at")
+  abTestConfig     Json?            @map("ab_test_config")
+  settings         Json             @default("{}") @map("settings")
+
+  // Compliance gate
+  complianceStatus ComplianceStatus @default(PENDING) @map("compliance_status")
+  complianceNotes  String?          @map("compliance_notes")
+  complianceAt     DateTime?        @map("compliance_at")
+
+  // Cached metrics
+  metrics          Json             @default("{\"sent\":0,\"delivered\":0,\"bounced\":0,\"opened\":0,\"clicked\":0,\"unsubscribed\":0,\"complained\":0}") @map("metrics")
+
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
 
   tenant       Tenant             @relation(fields: [tenantId], references: [id])
   createdBy    User               @relation("CampaignCreator", fields: [createdById], references: [id])
@@ -691,6 +513,7 @@ model Campaign {
 
   @@index([tenantId, status])
   @@index([tenantId, scheduledAt])
+  @@index([tenantId, complianceStatus])
   @@map("campaigns")
 }
 
@@ -699,7 +522,8 @@ model CampaignRecipient {
   campaignId      String          @map("campaign_id")
   contactId       String          @map("contact_id")
   email           String
-  status          RecipientStatus @default(PENDING)
+  variant         String?         // for A/B testing
+  status          RecipientStatus @default(QUEUED)
   sentAt          DateTime?       @map("sent_at")
   deliveredAt     DateTime?       @map("delivered_at")
   openedAt        DateTime?       @map("opened_at")
@@ -736,6 +560,49 @@ model CampaignLinkClick {
   @@map("campaign_link_clicks")
 }
 
+// ─── DRIP CAMPAIGNS / AUTOMATION SEQUENCES ──────────────
+
+model AutomationSequence {
+  id                String   @id @default(cuid())
+  tenantId          String   @map("tenant_id")
+  name              String
+  description       String?
+  triggerEvent      String   @map("trigger_event") // lead_created, deal_stage_changed, tag_added, etc.
+  triggerConditions Json     @default("{}") @map("trigger_conditions")
+  steps             Json[]   @default([]) // ordered array of { delay, action, template, condition }
+  isActive          Boolean  @default(false) @map("is_active")
+  enrolledCount     Int      @default(0) @map("enrolled_count")
+  completedCount    Int      @default(0) @map("completed_count")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id])
+  enrollments SequenceEnrollment[]
+
+  @@map("automation_sequences")
+}
+
+model SequenceEnrollment {
+  id           String         @id @default(cuid())
+  sequenceId   String         @map("sequence_id")
+  contactId    String         @map("contact_id")
+  currentStep  Int            @default(0) @map("current_step")
+  status       SequenceStatus @default(ACTIVE)
+  enrolledAt   DateTime       @default(now()) @map("enrolled_at")
+  nextActionAt DateTime?      @map("next_action_at")
+  completedAt  DateTime?      @map("completed_at")
+  exitReason   String?        @map("exit_reason")
+
+  sequence AutomationSequence @relation(fields: [sequenceId], references: [id])
+  contact  Contact            @relation(fields: [contactId], references: [id])
+
+  @@unique([sequenceId, contactId])
+  @@index([nextActionAt])
+  @@map("sequence_enrollments")
+}
+
+// ─── TASKS, ACTIVITIES, NOTES ───────────────────────────
+
 model Task {
   id             String       @id @default(cuid())
   tenantId       String       @map("tenant_id")
@@ -751,7 +618,8 @@ model Task {
   dueDate        DateTime?    @map("due_date")
   completedAt    DateTime?    @map("completed_at")
   createdByAgent Boolean      @default(false) @map("created_by_agent")
-  agentId        String?      @map("agent_id")
+  agentType      AgentType?   @map("agent_type")
+  outcome        String?      // completed, no_answer, voicemail, rescheduled
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
 
@@ -770,9 +638,13 @@ model Activity {
   id          String       @id @default(cuid())
   tenantId    String       @map("tenant_id")
   contactId   String?      @map("contact_id")
+  dealId      String?      @map("deal_id")
+  campaignId  String?      @map("campaign_id")
   userId      String?      @map("user_id")
   type        ActivityType
+  subject     String?
   description String
+  outcome     String?      // for calls: completed, no_answer, voicemail
   metadata    Json         @default("{}") @map("metadata")
   createdAt   DateTime     @default(now()) @map("created_at")
 
@@ -781,7 +653,7 @@ model Activity {
   user    User?    @relation(fields: [userId], references: [id])
 
   @@index([tenantId, contactId, createdAt])
-  @@index([tenantId, type])
+  @@index([tenantId, type, createdAt(sort: Desc)])
   @@map("activities")
 }
 
@@ -800,16 +672,21 @@ model Note {
   @@map("notes")
 }
 
+// ─── AGENT TRACKING ─────────────────────────────────────
+
 model AgentActionLog {
   id              String    @id @default(cuid())
   tenantId        String    @map("tenant_id")
   agentType       AgentType @map("agent_type")
-  action          String
+  action          String    // score_lead, create_campaign, enrich_contact, etc.
   input           Json      @default("{}") @map("input")
   output          Json      @default("{}") @map("output")
   status          String    @default("started") // started, completed, failed
   durationMs      Int?      @map("duration_ms")
-  triggeredBy     String    @map("triggered_by") // user, agent, schedule, event
+  tokensUsed      Int?      @map("tokens_used") // LLM tokens consumed
+  modelUsed       String?   @map("model_used")  // which model processed this
+  confidence      Float?    // agent's confidence score (0-1)
+  triggeredBy     String    @map("triggered_by") // user, agent, cron, event, webhook
   parentActionId  String?   @map("parent_action_id")
   error           String?
   createdAt       DateTime  @default(now()) @map("created_at")
@@ -820,27 +697,32 @@ model AgentActionLog {
 
   @@index([tenantId, agentType, createdAt])
   @@index([tenantId, triggeredBy])
+  @@index([tenantId, status])
   @@map("agent_action_logs")
 }
 
+// ─── AUTOMATION WORKFLOWS ───────────────────────────────
+
 model AutomationWorkflow {
-  id            String      @id @default(cuid())
-  tenantId      String      @map("tenant_id")
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
   name          String
   description   String?
-  triggerType   TriggerType @map("trigger_type")
-  triggerConfig Json        @map("trigger_config")
-  actions       Json[]      @default([])
-  isActive      Boolean     @default(false) @map("is_active")
-  lastRunAt     DateTime?   @map("last_run_at")
-  runCount      Int         @default(0) @map("run_count")
-  createdAt     DateTime    @default(now()) @map("created_at")
-  updatedAt     DateTime    @updatedAt @map("updated_at")
+  triggerType   String   @map("trigger_type") // event, schedule, manual
+  triggerConfig Json     @map("trigger_config")
+  actions       Json[]   @default([])
+  isActive      Boolean  @default(false) @map("is_active")
+  lastRunAt     DateTime? @map("last_run_at")
+  runCount      Int      @default(0) @map("run_count")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
   @@map("automation_workflows")
 }
+
+// ─── UNSUBSCRIBE / SUPPRESSION ──────────────────────────
 
 model Unsubscribe {
   id         String   @id @default(cuid())
@@ -860,36 +742,45 @@ model Unsubscribe {
 }
 ```
 
-## Key Design Decisions
+## Indexing Strategy
 
-### 1. Multi-Tenancy via `tenant_id`
-Every table includes a `tenant_id` foreign key. This enables:
-- Row-level security policies in PostgreSQL
-- Prisma middleware that auto-injects tenant context
-- Complete data isolation between organizations
+| Index Pattern | Purpose |
+|--------------|---------|
+| `(tenant_id, <column>)` | Every query is tenant-scoped — composite indexes are mandatory |
+| `(tenant_id, lead_score DESC)` | Lead Agent's scoring queries |
+| `(tenant_id, last_engaged_at)` | Identify inactive contacts for re-engagement campaigns |
+| `(tenant_id, stage_changed_at)` | Sales Agent's stale deal detection |
+| `(campaign_id, status)` | Campaign send progress tracking |
+| `(next_action_at) WHERE status = 'ACTIVE'` | Drip campaign sequence processor |
+| `(tenant_id, agent_type, created_at)` | Agent action log queries |
 
-### 2. JSONB for Flexibility
-`custom_fields`, `metadata`, `filter_criteria`, `settings`, and `ab_test_config` use JSONB columns. This allows:
-- Per-tenant custom fields without schema changes
-- Flexible segment filter definitions
-- Extensible campaign settings
+## pgvector Setup (Semantic Search)
 
-### 3. Soft Deletes (Recommended for Production)
-The schema above uses hard deletes for simplicity. For production, add:
-```prisma
-deletedAt DateTime? @map("deleted_at")
+```sql
+-- Enable pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Add embedding column to contacts (1536 dimensions for OpenAI ada-002)
+ALTER TABLE contacts ADD COLUMN embedding vector(1536);
+
+-- Create index for approximate nearest neighbor search
+CREATE INDEX idx_contacts_embedding ON contacts
+  USING ivfflat (embedding vector_cosine_ops)
+  WITH (lists = 100);
+
+-- Example: Find contacts similar to a given contact
+SELECT id, first_name, last_name, email,
+       1 - (embedding <=> (SELECT embedding FROM contacts WHERE id = 'target_id')) AS similarity
+FROM contacts
+WHERE tenant_id = 'tenant_123'
+  AND deleted_at IS NULL
+  AND id != 'target_id'
+ORDER BY embedding <=> (SELECT embedding FROM contacts WHERE id = 'target_id')
+LIMIT 10;
 ```
-And filter with `where: { deletedAt: null }` in queries.
 
-### 4. Indexing Strategy
-- Composite indexes on `(tenant_id, <frequently_filtered_column>)` for all tenant-scoped queries
-- Indexes on foreign keys used in JOINs
-- Indexes on `created_at` for time-based queries
-- `lead_score` indexed for the Lead Agent's scoring queries
-
-### 5. Agent Action Logging
-The `AgentActionLog` table captures every AI agent action with:
-- Hierarchical tracking via `parent_action_id` (for multi-step workflows)
-- Input/output capture for debugging and auditing
-- Duration tracking for performance monitoring
-- Trigger source tracking (user request vs. automated)
+**Use cases for vector search:**
+- "Find contacts similar to our best customer"
+- "Which deals look like the one we lost with Acme?"
+- "Search all notes for pricing objections" (embed notes, search semantically)
+- Agent retrieval for context-aware responses
