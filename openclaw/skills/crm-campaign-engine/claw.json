@@ -1,0 +1,25 @@
+{
+  "name": "crm-campaign-engine",
+  "version": "0.1.0",
+  "description": "Create, manage, and optimize email campaigns and drip sequences",
+  "author": "CRM AI Forge",
+  "triggers": ["campaign.created", "campaign.compliance_approved", "campaign.compliance_rejected"],
+  "tools": {
+    "allow": [
+      "api:GET /api/v1/campaigns*",
+      "api:POST /api/v1/campaigns",
+      "api:PATCH /api/v1/campaigns/*",
+      "api:POST /api/v1/campaigns/*/submit-compliance",
+      "api:POST /api/v1/campaigns/*/schedule",
+      "api:GET /api/v1/templates*",
+      "api:POST /api/v1/templates",
+      "api:GET /api/v1/contacts*",
+      "api:GET /api/v1/analytics/campaigns*"
+    ],
+    "deny": [
+      "api:DELETE *",
+      "database:*"
+    ]
+  },
+  "model": "sonnet"
+}

@@ -1,0 +1,24 @@
+{
+  "name": "crm-analytics-reports",
+  "version": "0.1.0",
+  "description": "Analytics, reporting, and business intelligence",
+  "author": "CRM AI Forge",
+  "triggers": ["cron:daily_summary", "cron:weekly_report", "cron:monthly_review"],
+  "tools": {
+    "allow": [
+      "api:GET /api/v1/analytics*",
+      "api:GET /api/v1/contacts*",
+      "api:GET /api/v1/deals*",
+      "api:GET /api/v1/campaigns*",
+      "api:GET /api/v1/tasks*",
+      "api:GET /api/v1/pipelines*"
+    ],
+    "deny": [
+      "api:POST *",
+      "api:PATCH *",
+      "api:DELETE *",
+      "database:*"
+    ]
+  },
+  "model": "sonnet"
+}

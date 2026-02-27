@@ -1,0 +1,23 @@
+{
+  "name": "crm-lead-management",
+  "version": "0.1.0",
+  "description": "Manage contacts, lead scoring, and lifecycle stages",
+  "author": "CRM AI Forge",
+  "triggers": ["contact.created", "contact.updated", "form.submitted", "email.opened"],
+  "tools": {
+    "allow": [
+      "api:GET /api/v1/contacts*",
+      "api:POST /api/v1/contacts",
+      "api:PATCH /api/v1/contacts/*",
+      "api:GET /api/v1/companies*",
+      "api:POST /api/v1/activities",
+      "api:POST /api/v1/tasks"
+    ],
+    "deny": [
+      "api:DELETE *",
+      "email:send",
+      "database:*"
+    ]
+  },
+  "model": "sonnet"
+}

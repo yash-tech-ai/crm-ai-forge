@@ -1,0 +1,25 @@
+{
+  "name": "crm-deal-pipeline",
+  "version": "0.1.0",
+  "description": "Manage deals, pipeline stages, and sales forecasting",
+  "author": "CRM AI Forge",
+  "triggers": ["deal.created", "deal.stage_changed", "deal.won", "deal.lost", "task.overdue"],
+  "tools": {
+    "allow": [
+      "api:GET /api/v1/deals*",
+      "api:POST /api/v1/deals",
+      "api:PATCH /api/v1/deals/*",
+      "api:GET /api/v1/pipelines*",
+      "api:GET /api/v1/contacts*",
+      "api:GET /api/v1/companies*",
+      "api:POST /api/v1/tasks",
+      "api:POST /api/v1/activities",
+      "api:GET /api/v1/analytics/pipeline*"
+    ],
+    "deny": [
+      "api:DELETE *",
+      "database:*"
+    ]
+  },
+  "model": "sonnet"
+}

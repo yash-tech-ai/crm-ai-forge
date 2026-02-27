@@ -1,0 +1,23 @@
+{
+  "name": "@crm-ai-forge/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@crm-ai-forge/database": "workspace:*",
+    "@crm-ai-forge/shared": "workspace:*",
+    "bullmq": "^5.20.0",
+    "ioredis": "^5.4.0",
+    "pino": "^9.5.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.0"
+  }
+}

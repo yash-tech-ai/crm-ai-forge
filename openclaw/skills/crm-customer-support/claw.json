@@ -1,0 +1,23 @@
+{
+  "name": "crm-customer-support",
+  "version": "0.1.0",
+  "description": "Customer support, FAQ handling, and issue escalation",
+  "author": "CRM AI Forge",
+  "triggers": ["support.ticket_created"],
+  "tools": {
+    "allow": [
+      "api:GET /api/v1/contacts*",
+      "api:GET /api/v1/deals*",
+      "api:GET /api/v1/activities*",
+      "api:GET /api/v1/tasks*",
+      "api:POST /api/v1/tasks",
+      "api:POST /api/v1/activities"
+    ],
+    "deny": [
+      "api:DELETE *",
+      "api:PATCH *",
+      "database:*"
+    ]
+  },
+  "model": "sonnet"
+}

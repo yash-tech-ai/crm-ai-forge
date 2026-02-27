@@ -1,0 +1,56 @@
+{
+  "name": "crm-ai-forge",
+  "version": "0.1.0",
+  "description": "AI-native CRM and Campaign Management — agents are the CRM",
+  "agents": "./AGENTS.md",
+  "skills": [
+    "./skills/crm-lead-management",
+    "./skills/crm-campaign-engine",
+    "./skills/crm-deal-pipeline",
+    "./skills/crm-analytics-reports",
+    "./skills/crm-customer-support"
+  ],
+  "cron": [
+    {
+      "schedule": "0 9 * * *",
+      "action": "daily_summary",
+      "agent": "insight",
+      "description": "Morning brief — key metrics and tasks due"
+    },
+    {
+      "schedule": "0 9 * * 1",
+      "action": "weekly_report",
+      "agent": "insight",
+      "description": "Monday weekly summary — pipeline, campaigns, performance"
+    },
+    {
+      "schedule": "0 2 * * *",
+      "action": "batch_enrich",
+      "agent": "enrichment",
+      "description": "Nightly enrichment of new contacts/companies"
+    },
+    {
+      "schedule": "0 3 * * *",
+      "action": "lead_score_decay",
+      "agent": "lead",
+      "description": "Nightly lead score decay calculation"
+    },
+    {
+      "schedule": "0 8 * * *",
+      "action": "stale_deal_check",
+      "agent": "sales",
+      "description": "Daily check for deals stuck > 14 days in same stage"
+    }
+  ],
+  "api": {
+    "baseUrl": "http://localhost:3001",
+    "authHeader": "Authorization",
+    "authScheme": "Bearer"
+  },
+  "channels": ["web", "whatsapp", "telegram", "slack"],
+  "modelConfig": {
+    "orchestrator": "opus",
+    "specialists": "sonnet",
+    "background": "haiku"
+  }
+}
