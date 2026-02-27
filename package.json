@@ -1,0 +1,26 @@
+{
+  "name": "crm-ai-forge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI-Agentic CRM + Campaign Platform powered by OpenClaw",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "db:migrate": "pnpm --filter @crm-ai-forge/database db:migrate",
+    "db:seed": "pnpm --filter @crm-ai-forge/database db:seed",
+    "db:studio": "pnpm --filter @crm-ai-forge/database db:studio",
+    "db:generate": "pnpm --filter @crm-ai-forge/database db:generate"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^22.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
