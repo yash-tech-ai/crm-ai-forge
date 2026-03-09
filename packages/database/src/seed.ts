@@ -11,6 +11,24 @@ function hashPassword(password: string): string {
 async function main() {
   console.log("Seeding database...");
 
+  // ─── Clean existing seed data ──────────────────────────
+  // Delete in reverse dependency order to avoid FK constraints
+  const existingTenant = await prisma.tenant.findUnique({ where: { slug: "demo-company" } });
+  if (existingTenant) {
+    console.log("  Cleaning existing seed data...");
+    const tid = existingTenant.id;
+    await prisma.activity.deleteMany({ where: { tenantId: tid } });
+    await prisma.task.deleteMany({ where: { tenantId: tid } });
+    await prisma.note.deleteMany({ where: { tenantId: tid } });
+    await prisma.deal.deleteMany({ where: { tenantId: tid } });
+    await prisma.contact.deleteMany({ where: { tenantId: tid } });
+    await prisma.company.deleteMany({ where: { tenantId: tid } });
+    await prisma.audienceSegment.deleteMany({ where: { tenantId: tid } });
+    await prisma.emailTemplate.deleteMany({ where: { tenantId: tid } });
+    await prisma.pipelineStage.deleteMany({ where: { pipeline: { tenantId: tid } } });
+    await prisma.pipeline.deleteMany({ where: { tenantId: tid } });
+  }
+
   // ─── Tenant ──────────────────────────────────────────
   const tenant = await prisma.tenant.upsert({
     where: { slug: "demo-company" },
