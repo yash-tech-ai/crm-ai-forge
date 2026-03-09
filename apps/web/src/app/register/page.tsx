@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { API_URL } from "@/lib/api";
 
 export default function RegisterPage() {
   const [form, setForm] = useState({
@@ -25,7 +26,7 @@ export default function RegisterPage() {
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/register`,
+        `${API_URL}/api/v1/auth/register`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
