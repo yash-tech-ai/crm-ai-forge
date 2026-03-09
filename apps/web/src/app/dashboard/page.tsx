@@ -1,5 +1,7 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "@/lib/api";
 import {
   Users,
   Briefcase,
@@ -7,19 +9,114 @@ import {
   CheckSquare,
   TrendingUp,
   AlertTriangle,
+  Clock,
 } from "lucide-react";
 
-// Placeholder dashboard — will be connected to API in Phase 2
-const stats = [
-  { name: "Total Contacts", value: "—", icon: Users, color: "bg-blue-500" },
-  { name: "Active Deals", value: "—", icon: Briefcase, color: "bg-green-500" },
-  { name: "Campaigns", value: "—", icon: Mail, color: "bg-purple-500" },
-  { name: "Pending Tasks", value: "—", icon: CheckSquare, color: "bg-yellow-500" },
-  { name: "Pipeline Value", value: "—", icon: TrendingUp, color: "bg-indigo-500" },
-  { name: "Overdue Tasks", value: "—", icon: AlertTriangle, color: "bg-red-500" },
-];
+interface DashboardData {
+  contacts: { total: number; newThisMonth: number };
+  deals: { active: number; totalValue: number };
+  campaigns: { active: number };
+  tasks: { pending: number; overdue: number };
+  recentActivities: Array<{
+    id: string;
+    type: string;
+    description: string;
+    createdAt: string;
+    contact?: { id: string; firstName: string; lastName: string } | null;
+    user?: { id: string; firstName: string; lastName: string } | null;
+  }>;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function activityLabel(type: string) {
+  const labels: Record<string, string> = {
+    CONTACT_CREATED: "New contact",
+    DEAL_CREATED: "Deal created",
+    DEAL_STAGE_CHANGED: "Deal moved",
+    DEAL_WON: "Deal won",
+    DEAL_LOST: "Deal lost",
+    EMAIL_SENT: "Email sent",
+    CALL_MADE: "Call made",
+    TASK_COMPLETED: "Task completed",
+    NOTE_ADDED: "Note added",
+    AGENT_ACTION: "AI action",
+  };
+  return labels[type] || type.replace(/_/g, " ").toLowerCase();
+}
 
 export default function DashboardPage() {
+  const { data, isLoading } = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: () =>
+      apiFetch<{ data: DashboardData }>("/api/v1/analytics/dashboard").then(
+        (r) => r.data
+      ),
+  });
+
+  const stats = [
+    {
+      name: "Total Contacts",
+      value: data?.contacts.total ?? "—",
+      sub: data ? `+${data.contacts.newThisMonth} this month` : "",
+      icon: Users,
+      color: "bg-blue-500",
+    },
+    {
+      name: "Active Deals",
+      value: data?.deals.active ?? "—",
+      sub: "",
+      icon: Briefcase,
+      color: "bg-green-500",
+    },
+    {
+      name: "Pipeline Value",
+      value: data ? formatCurrency(data.deals.totalValue) : "—",
+      sub: "",
+      icon: TrendingUp,
+      color: "bg-indigo-500",
+    },
+    {
+      name: "Active Campaigns",
+      value: data?.campaigns.active ?? "—",
+      sub: "",
+      icon: Mail,
+      color: "bg-purple-500",
+    },
+    {
+      name: "Pending Tasks",
+      value: data?.tasks.pending ?? "—",
+      sub: "",
+      icon: CheckSquare,
+      color: "bg-yellow-500",
+    },
+    {
+      name: "Overdue Tasks",
+      value: data?.tasks.overdue ?? "—",
+      sub: "",
+      icon: AlertTriangle,
+      color: "bg-red-500",
+    },
+  ];
+
   return (
     <div>
       <div className="mb-6">
@@ -44,7 +141,16 @@ export default function DashboardPage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-gray-500">{stat.name}</p>
-                <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {isLoading ? (
+                    <span className="inline-block h-7 w-16 animate-pulse rounded bg-gray-200" />
+                  ) : (
+                    stat.value
+                  )}
+                </p>
+                {stat.sub && (
+                  <p className="text-xs text-green-600">{stat.sub}</p>
+                )}
               </div>
             </div>
           </div>
@@ -53,27 +159,58 @@ export default function DashboardPage() {
 
       {/* Recent Activity */}
       <div className="mt-8 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900">Recent Activity</h2>
-        <p className="mt-2 text-sm text-gray-500">
-          Activity feed will be connected to the API in Phase 2.
-        </p>
+        <h2 className="text-lg font-semibold text-gray-900">
+          Recent Activity
+        </h2>
         <div className="mt-4 space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="flex items-center gap-3 rounded-md bg-gray-50 p-3"
-            >
-              <div className="h-2 w-2 rounded-full bg-gray-300" />
-              <div className="h-4 w-48 animate-pulse rounded bg-gray-200" />
-              <div className="ml-auto h-4 w-20 animate-pulse rounded bg-gray-200" />
-            </div>
-          ))}
+          {isLoading
+            ? [1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-3 rounded-md bg-gray-50 p-3"
+                >
+                  <div className="h-2 w-2 rounded-full bg-gray-300" />
+                  <div className="h-4 w-48 animate-pulse rounded bg-gray-200" />
+                  <div className="ml-auto h-4 w-20 animate-pulse rounded bg-gray-200" />
+                </div>
+              ))
+            : data?.recentActivities.map((activity) => (
+                <div
+                  key={activity.id}
+                  className="flex items-center gap-3 rounded-md bg-gray-50 p-3"
+                >
+                  <div className="h-2 w-2 rounded-full bg-primary-400" />
+                  <div className="flex-1 text-sm text-gray-700">
+                    <span className="font-medium">
+                      {activityLabel(activity.type)}
+                    </span>
+                    {" — "}
+                    {activity.description}
+                    {activity.contact && (
+                      <span className="text-gray-500">
+                        {" "}
+                        ({activity.contact.firstName}{" "}
+                        {activity.contact.lastName})
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                    <Clock className="h-3 w-3" />
+                    {timeAgo(activity.createdAt)}
+                  </div>
+                </div>
+              ))}
+          {!isLoading && (!data?.recentActivities || data.recentActivities.length === 0) && (
+            <p className="text-sm text-gray-500">No recent activity yet.</p>
+          )}
         </div>
       </div>
 
       {/* Agent Status */}
       <div className="mt-8 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900">AI Agent Status</h2>
+        <h2 className="text-lg font-semibold text-gray-900">
+          AI Agent Status
+        </h2>
         <p className="mt-2 text-sm text-gray-500">
           8 agents monitoring your CRM — powered by OpenClaw.
         </p>
@@ -93,7 +230,9 @@ export default function DashboardPage() {
               className="flex items-center gap-2 rounded-md border border-gray-200 p-3"
             >
               <div className="h-2 w-2 rounded-full bg-green-400" />
-              <span className="text-xs font-medium text-gray-700">{agent}</span>
+              <span className="text-xs font-medium text-gray-700">
+                {agent}
+              </span>
             </div>
           ))}
         </div>

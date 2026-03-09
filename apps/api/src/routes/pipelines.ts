@@ -80,6 +80,76 @@ export async function pipelineRoutes(app: FastifyInstance) {
     sendSuccess(reply, pipeline, 201);
   });
 
+  // ─── Update Pipeline ─────────────────────────────────
+  app.patch("/:id", async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = validate(idParamSchema, request.params);
+    const body = request.body as { name?: string; isDefault?: boolean; stages?: Array<{ id?: string; name: string; position: number; probability?: number; isWon?: boolean; isLost?: boolean }> };
+
+    const existing = await prisma.pipeline.findFirst({
+      where: { id, tenantId },
+      include: { stages: { orderBy: { position: "asc" } } },
+    });
+    if (!existing) return sendNotFound(reply, "Pipeline");
+
+    // If setting as default, unset current default
+    if (body.isDefault) {
+      await prisma.pipeline.updateMany({
+        where: { tenantId, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+
+    // Update pipeline fields
+    const pipeline = await prisma.pipeline.update({
+      where: { id },
+      data: {
+        ...(body.name && { name: body.name }),
+        ...(body.isDefault !== undefined && { isDefault: body.isDefault }),
+      },
+      include: {
+        stages: { orderBy: { position: "asc" } },
+      },
+    });
+
+    // Update stages if provided
+    if (body.stages) {
+      for (const stage of body.stages) {
+        if (stage.id) {
+          await prisma.pipelineStage.update({
+            where: { id: stage.id },
+            data: {
+              name: stage.name,
+              position: stage.position,
+              probability: stage.probability ?? 0,
+              isWon: stage.isWon ?? false,
+              isLost: stage.isLost ?? false,
+            },
+          });
+        } else {
+          await prisma.pipelineStage.create({
+            data: {
+              pipelineId: id,
+              name: stage.name,
+              position: stage.position,
+              probability: stage.probability ?? 0,
+              isWon: stage.isWon ?? false,
+              isLost: stage.isLost ?? false,
+            },
+          });
+        }
+      }
+    }
+
+    // Fetch updated pipeline
+    const updated = await prisma.pipeline.findFirst({
+      where: { id },
+      include: { stages: { orderBy: { position: "asc" } } },
+    });
+
+    sendSuccess(reply, updated);
+  });
+
   // ─── Delete Pipeline ─────────────────────────────────
   app.delete("/:id", async (request, reply) => {
     const tenantId = getTenantId(request);
