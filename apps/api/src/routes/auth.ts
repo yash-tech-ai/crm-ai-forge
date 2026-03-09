@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { hash, compare } from "bcryptjs";
+import bcryptjs from "bcryptjs";
+const { hash, compare } = bcryptjs;
 import { prisma } from "@crm-ai-forge/database";
 import {
   loginSchema,
