@@ -20,6 +20,7 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 
 # Generate Prisma client (access pnpm virtual store directly, bypassing symlinks)
+ENV PRISMA_GENERATE_SKIP_AUTOINSTALL=true
 RUN node node_modules/.pnpm/prisma@*/node_modules/prisma/build/index.js generate --schema=packages/database/prisma/schema.prisma
 
 # Build all packages (Turborepo handles dependency order)
