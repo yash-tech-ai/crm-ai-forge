@@ -11,8 +11,8 @@ COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
-# Flat hoist in Docker so all binaries (prisma, dotenv-cli) are in root node_modules
-RUN echo "node-linker=hoisted" > .npmrc && pnpm install --frozen-lockfile
+# Hoist all deps so workspace devDependencies (prisma, tsc, dotenv-cli) are accessible
+RUN echo "shamefully-hoist=true" > .npmrc && pnpm install --frozen-lockfile
 
 # ── Build ─────────────────────────────────────────────
 FROM base AS build
