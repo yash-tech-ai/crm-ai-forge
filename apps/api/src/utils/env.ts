@@ -26,4 +26,15 @@ export const env = {
 
   // CORS
   CORS_ORIGIN: optionalEnv("CORS_ORIGIN", "http://localhost:3000"),
+
+  // SMTP (optional — if not set, emails are logged only)
+  SMTP_HOST: process.env.SMTP_HOST ?? "",
+  SMTP_PORT: parseInt(optionalEnv("SMTP_PORT", "587"), 10),
+  SMTP_USER: process.env.SMTP_USER ?? "",
+  SMTP_PASS: process.env.SMTP_PASS ?? "",
+  DEFAULT_FROM_EMAIL: optionalEnv("DEFAULT_FROM_EMAIL", "noreply@crm-ai-forge.local"),
+  DEFAULT_FROM_NAME: optionalEnv("DEFAULT_FROM_NAME", "CRM AI Forge"),
+
+  // App URL (for tracking links)
+  APP_URL: optionalEnv("APP_URL", "http://localhost:3001"),
 } as const;

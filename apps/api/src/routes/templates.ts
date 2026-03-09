@@ -12,6 +12,11 @@ import {
   sendPaginated,
   sendNotFound,
 } from "../utils/response.js";
+import {
+  renderTemplate,
+  buildTemplateContext,
+  extractVariables,
+} from "../utils/template-renderer.js";
 
 export async function templateRoutes(app: FastifyInstance) {
   app.addHook("preHandler", authenticate);
@@ -122,5 +127,59 @@ export async function templateRoutes(app: FastifyInstance) {
 
     await prisma.emailTemplate.delete({ where: { id } });
     sendSuccess(reply, { deleted: true });
+  });
+
+  // ─── Preview / Render Template ─────────────────────
+  app.post("/:id/render", async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = validate(idParamSchema, request.params);
+    const { contactId } = request.body as { contactId?: string };
+
+    const template = await prisma.emailTemplate.findFirst({
+      where: { id, tenantId },
+    });
+    if (!template) return sendNotFound(reply, "Email template");
+
+    // If a contactId is provided, render with real contact data
+    let context: Record<string, string | undefined> = {
+      first_name: "John",
+      last_name: "Doe",
+      full_name: "John Doe",
+      email: "john@example.com",
+      company_name: "Acme Inc",
+      current_date: new Date().toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }),
+      current_year: new Date().getFullYear().toString(),
+      unsubscribe_url: "#",
+    };
+
+    if (contactId) {
+      const contact = await prisma.contact.findFirst({
+        where: { id: contactId, tenantId, deletedAt: null },
+        include: { company: true },
+      });
+      if (contact) {
+        context = buildTemplateContext(contact, contact.company);
+      }
+    }
+
+    const renderedSubject = renderTemplate(template.subject, context);
+    const renderedHtml = renderTemplate(template.htmlBody, context);
+    const renderedText = template.textBody
+      ? renderTemplate(template.textBody, context)
+      : undefined;
+    const variables = extractVariables(
+      template.htmlBody + " " + template.subject
+    );
+
+    sendSuccess(reply, {
+      subject: renderedSubject,
+      html: renderedHtml,
+      text: renderedText,
+      variables,
+    });
   });
 }

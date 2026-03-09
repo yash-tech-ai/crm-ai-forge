@@ -14,6 +14,10 @@ import { taskRoutes } from "./routes/tasks.js";
 import { campaignRoutes } from "./routes/campaigns.js";
 import { templateRoutes } from "./routes/templates.js";
 import { analyticsRoutes } from "./routes/analytics.js";
+import { noteRoutes } from "./routes/notes.js";
+import { searchRoutes } from "./routes/search.js";
+import { segmentRoutes } from "./routes/segments.js";
+import { trackingRoutes } from "./routes/tracking.js";
 
 export async function buildApp() {
   const app = Fastify({
@@ -63,6 +67,10 @@ export async function buildApp() {
   await app.register(campaignRoutes, { prefix: "/api/v1/campaigns" });
   await app.register(templateRoutes, { prefix: "/api/v1/templates" });
   await app.register(analyticsRoutes, { prefix: "/api/v1/analytics" });
+  await app.register(noteRoutes, { prefix: "/api/v1/notes" });
+  await app.register(searchRoutes, { prefix: "/api/v1/search" });
+  await app.register(segmentRoutes, { prefix: "/api/v1/segments" });
+  await app.register(trackingRoutes, { prefix: "/t" });
 
   // ─── Global Error Handler ────────────────────────────
   app.setErrorHandler((error, request, reply) => {

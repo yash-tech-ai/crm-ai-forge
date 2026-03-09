@@ -14,6 +14,7 @@ import {
   sendNotFound,
 } from "../utils/response.js";
 import { z } from "zod";
+import { buildSegmentFilter } from "../utils/segment-filter.js";
 
 const campaignFilterSchema = paginationSchema.extend({
   status: z
@@ -205,6 +206,151 @@ export async function campaignRoutes(app: FastifyInstance) {
     });
 
     sendSuccess(reply, updated);
+  });
+
+  // ─── Approve Compliance ─────────────────────────────
+  app.post("/:id/approve-compliance", async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = validate(idParamSchema, request.params);
+    const body = request.body as { notes?: string };
+
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, tenantId },
+    });
+    if (!campaign) return sendNotFound(reply, "Campaign");
+
+    if (campaign.complianceStatus !== "PENDING") {
+      return reply.status(409).send({
+        success: false,
+        error: {
+          code: "INVALID_STATE",
+          message: "Campaign is not pending compliance review",
+        },
+      });
+    }
+
+    const updated = await prisma.campaign.update({
+      where: { id },
+      data: {
+        complianceStatus: "APPROVED",
+        complianceNotes: body.notes ?? null,
+        complianceAt: new Date(),
+      },
+    });
+
+    sendSuccess(reply, updated);
+  });
+
+  // ─── Send Campaign (populate recipients + queue) ───
+  app.post("/:id/send", async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = validate(idParamSchema, request.params);
+
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, tenantId },
+      include: {
+        segment: true,
+        template: true,
+      },
+    });
+    if (!campaign) return sendNotFound(reply, "Campaign");
+
+    // Must be scheduled or compliance-approved
+    if (!["SCHEDULED", "PENDING_COMPLIANCE"].includes(campaign.status) &&
+        campaign.complianceStatus !== "APPROVED") {
+      // Allow sending draft campaigns directly in development
+      if (campaign.status !== "DRAFT") {
+        return reply.status(409).send({
+          success: false,
+          error: {
+            code: "INVALID_STATE",
+            message: "Campaign must be in DRAFT or SCHEDULED status to send",
+          },
+        });
+      }
+    }
+
+    if (!campaign.template) {
+      return reply.status(400).send({
+        success: false,
+        error: {
+          code: "MISSING_TEMPLATE",
+          message: "Campaign must have an email template assigned",
+        },
+      });
+    }
+
+    // Get contacts from segment (or all contacts if no segment)
+    let contactWhere: any = { tenantId, deletedAt: null, consentStatus: { not: "OPTED_OUT" } };
+    if (campaign.segment) {
+      contactWhere = buildSegmentFilter(
+        campaign.segment.filterCriteria as Record<string, unknown>,
+        tenantId
+      );
+      // Ensure opted-out contacts are excluded
+      contactWhere.consentStatus = { not: "OPTED_OUT" };
+    }
+
+    const contacts = await prisma.contact.findMany({
+      where: contactWhere,
+      select: { id: true, email: true },
+    });
+
+    if (contacts.length === 0) {
+      return reply.status(400).send({
+        success: false,
+        error: {
+          code: "NO_RECIPIENTS",
+          message: "No eligible contacts found for this campaign",
+        },
+      });
+    }
+
+    // Check suppression list
+    const suppressedEmails = await prisma.unsubscribe.findMany({
+      where: { tenantId, email: { in: contacts.map((c) => c.email) } },
+      select: { email: true },
+    });
+    const suppressedSet = new Set(suppressedEmails.map((s) => s.email));
+    const eligibleContacts = contacts.filter((c) => !suppressedSet.has(c.email));
+
+    // Create campaign recipients
+    const recipients = await prisma.$transaction(
+      eligibleContacts.map((contact) =>
+        prisma.campaignRecipient.upsert({
+          where: {
+            campaignId_contactId: {
+              campaignId: id,
+              contactId: contact.id,
+            },
+          },
+          create: {
+            campaignId: id,
+            contactId: contact.id,
+            email: contact.email,
+            status: "QUEUED",
+          },
+          update: {},
+        })
+      )
+    );
+
+    // Update campaign status
+    await prisma.campaign.update({
+      where: { id },
+      data: {
+        status: "SENDING",
+        sentAt: new Date(),
+      },
+    });
+
+    sendSuccess(reply, {
+      campaignId: id,
+      recipientCount: recipients.length,
+      suppressedCount: suppressedSet.size,
+      status: "SENDING",
+      message: `Campaign queued for ${recipients.length} recipients`,
+    });
   });
 
   // ─── Delete Campaign ─────────────────────────────────
