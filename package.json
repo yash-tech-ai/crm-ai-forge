@@ -12,7 +12,9 @@
     "db:migrate": "pnpm --filter @crm-ai-forge/database db:migrate",
     "db:seed": "pnpm --filter @crm-ai-forge/database db:seed",
     "db:studio": "pnpm --filter @crm-ai-forge/database db:studio",
-    "db:generate": "pnpm --filter @crm-ai-forge/database db:generate"
+    "db:generate": "pnpm --filter @crm-ai-forge/database db:generate",
+    "db:push": "pnpm --filter @crm-ai-forge/database db:push",
+    "db:reset": "pnpm --filter @crm-ai-forge/database db:reset"
   },
   "devDependencies": {
     "turbo": "^2.4.0",
