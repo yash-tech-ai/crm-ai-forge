@@ -1,6 +1,7 @@
 version: '3.9'
 
 services:
+  # ── Infrastructure ──────────────────────────────────
   postgres:
     image: postgres:16-alpine
     environment:
@@ -41,6 +42,87 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+
+  # ── Application ─────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/crm_ai_forge
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-secure-secret-min-32-chars-long}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-to-another-secure-secret-min-32}
+      CORS_ORIGIN: http://localhost:3000
+      NODE_ENV: production
+      PORT: 3001
+      LOG_LEVEL: info
+      APP_URL: http://localhost:3001
+      DEFAULT_FROM_EMAIL: noreply@crm-ai-forge.local
+      DEFAULT_FROM_NAME: CRM AI Forge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/crm_ai_forge
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+      LOG_LEVEL: info
+      APP_URL: http://localhost:3001
+      DEFAULT_FROM_EMAIL: noreply@crm-ai-forge.local
+      DEFAULT_FROM_NAME: CRM AI Forge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NODE_ENV: production
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ── Run database setup (one-time) ───────────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    command: >
+      sh -c "
+        npx prisma db push --schema=packages/database/prisma/schema.prisma &&
+        echo 'Database schema pushed successfully'
+      "
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/crm_ai_forge
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    profiles:
+      - setup
 
 volumes:
   postgres_data:
