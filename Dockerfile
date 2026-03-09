@@ -19,13 +19,8 @@ RUN pnpm install --frozen-lockfile
 # Copy source
 COPY . .
 
-# Generate Prisma client (resolve via Node to handle pnpm's symlink structure)
-RUN node -e " \
-  const p = require.resolve('prisma/package.json', {paths: [process.cwd()+'/packages/database']}); \
-  require('child_process').execSync( \
-    'node ' + require('path').join(require('path').dirname(p), 'build', 'index.js') + ' generate --schema=packages/database/prisma/schema.prisma', \
-    {stdio: 'inherit'} \
-  );"
+# Generate Prisma client (access pnpm virtual store directly, bypassing symlinks)
+RUN node node_modules/.pnpm/prisma@*/node_modules/prisma/build/index.js generate --schema=packages/database/prisma/schema.prisma
 
 # Build all packages (Turborepo handles dependency order)
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
