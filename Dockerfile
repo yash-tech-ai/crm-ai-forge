@@ -18,8 +18,8 @@ FROM base AS build
 COPY --from=deps /app ./
 COPY . .
 
-# Generate Prisma client (scoped to database package where prisma is installed)
-RUN pnpm --filter @crm-ai-forge/database exec prisma generate
+# Generate Prisma client (use hoisted binary from root node_modules)
+RUN ./node_modules/.bin/prisma generate --schema=packages/database/prisma/schema.prisma
 
 # Build all packages (Turborepo handles dependency order)
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
