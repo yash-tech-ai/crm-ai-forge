@@ -3,24 +3,24 @@ FROM node:22-alpine AS base
 RUN corepack enable && corepack prepare pnpm@9 --activate
 WORKDIR /app
 
-# ── Dependencies ──────────────────────────────────────
-FROM base AS deps
+# ── Build ─────────────────────────────────────────────
+# Single stage keeps pnpm symlinks intact (COPY --from flattens them)
+FROM base AS build
+
+# Install dependencies (cached unless package.json/lockfile change)
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json ./
 COPY packages/database/package.json packages/database/
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
-# Hoist all deps so workspace devDependencies (prisma, tsc, dotenv-cli) are accessible
-RUN echo "shamefully-hoist=true" > .npmrc && pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
-# ── Build ─────────────────────────────────────────────
-FROM base AS build
-COPY --from=deps /app ./
+# Copy source
 COPY . .
 
 # Generate Prisma client
-RUN ./node_modules/.bin/prisma generate --schema=packages/database/prisma/schema.prisma
+RUN pnpm --filter @crm-ai-forge/database exec prisma generate
 
 # Build all packages (Turborepo handles dependency order)
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
