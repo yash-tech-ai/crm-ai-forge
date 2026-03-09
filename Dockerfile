@@ -11,14 +11,15 @@ COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY apps/worker/package.json apps/worker/
-RUN pnpm install --frozen-lockfile
+# Flat hoist in Docker so all binaries (prisma, dotenv-cli) are in root node_modules
+RUN echo "node-linker=hoisted" > .npmrc && pnpm install --frozen-lockfile
 
 # ── Build ─────────────────────────────────────────────
 FROM base AS build
 COPY --from=deps /app ./
 COPY . .
 
-# Generate Prisma client (use hoisted binary from root node_modules)
+# Generate Prisma client
 RUN ./node_modules/.bin/prisma generate --schema=packages/database/prisma/schema.prisma
 
 # Build all packages (Turborepo handles dependency order)
