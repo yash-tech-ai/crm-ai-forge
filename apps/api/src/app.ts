@@ -18,6 +18,7 @@ import { noteRoutes } from "./routes/notes.js";
 import { searchRoutes } from "./routes/search.js";
 import { segmentRoutes } from "./routes/segments.js";
 import { trackingRoutes } from "./routes/tracking.js";
+import { sequenceRoutes } from "./routes/sequences.js";
 
 export async function buildApp() {
   const app = Fastify({
@@ -71,6 +72,7 @@ export async function buildApp() {
   await app.register(searchRoutes, { prefix: "/api/v1/search" });
   await app.register(segmentRoutes, { prefix: "/api/v1/segments" });
   await app.register(trackingRoutes, { prefix: "/t" });
+  await app.register(sequenceRoutes, { prefix: "/api/v1/sequences" });
 
   // ─── Global Error Handler ────────────────────────────
   app.setErrorHandler((error, request, reply) => {
