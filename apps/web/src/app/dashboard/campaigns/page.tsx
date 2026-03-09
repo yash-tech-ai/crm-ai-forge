@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import {
@@ -15,6 +16,7 @@ import {
   AlertCircle,
   X,
   ArrowRight,
+  BarChart3,
 } from "lucide-react";
 
 interface Campaign {
@@ -102,6 +104,7 @@ function rate(num: number, denom: number) {
 }
 
 export default function CampaignsPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
@@ -254,7 +257,7 @@ export default function CampaignsPage() {
 
                   {/* Metrics */}
                   {m.sent > 0 && (
-                    <div className="mt-4 grid grid-cols-5 gap-4 border-t border-gray-100 pt-4">
+                    <div className="mt-4 grid grid-cols-6 gap-4 border-t border-gray-100 pt-4">
                       <div>
                         <p className="text-xs text-gray-400">Sent</p>
                         <p className="text-sm font-semibold text-gray-900">
@@ -284,6 +287,19 @@ export default function CampaignsPage() {
                         <p className="text-sm font-semibold text-red-600">
                           {rate(m.bounced, m.sent)}
                         </p>
+                      </div>
+                      <div className="flex items-center justify-end">
+                        <button
+                          onClick={() =>
+                            router.push(
+                              `/dashboard/campaigns/${campaign.id}`
+                            )
+                          }
+                          className="flex items-center gap-1 rounded-md text-xs font-medium text-primary-600 hover:text-primary-800"
+                        >
+                          <BarChart3 className="h-3.5 w-3.5" />
+                          Analytics
+                        </button>
                       </div>
                     </div>
                   )}

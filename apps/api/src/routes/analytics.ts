@@ -195,6 +195,143 @@ export async function analyticsRoutes(app: FastifyInstance) {
     sendSuccess(reply, campaigns);
   });
 
+  // ─── Campaign Detail Analytics ──────────────────────
+  app.get("/campaigns/:id", async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = request.params as { id: string };
+
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, tenantId },
+      include: {
+        template: { select: { id: true, name: true } },
+        segment: { select: { id: true, name: true, contactCount: true } },
+        createdBy: {
+          select: { id: true, firstName: true, lastName: true },
+        },
+      },
+    });
+    if (!campaign) {
+      return reply.status(404).send({
+        success: false,
+        error: { code: "NOT_FOUND", message: "Campaign not found" },
+      });
+    }
+
+    // Get recipient status breakdown
+    const recipientStats = await prisma.campaignRecipient.groupBy({
+      by: ["status"],
+      where: { campaignId: id },
+      _count: { id: true },
+    });
+
+    const statusBreakdown = recipientStats.reduce(
+      (acc, r) => {
+        acc[r.status] = r._count.id;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+
+    const totalRecipients = recipientStats.reduce(
+      (sum, r) => sum + r._count.id,
+      0
+    );
+
+    // Get top clicked links
+    const topLinks = await prisma.campaignLinkClick.groupBy({
+      by: ["url"],
+      where: { campaignId: id },
+      _count: { id: true },
+      orderBy: { _count: { id: "desc" } },
+      take: 10,
+    });
+
+    // Get hourly open/click timeline (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const recentOpens = await prisma.campaignRecipient.findMany({
+      where: {
+        campaignId: id,
+        openedAt: { gte: sevenDaysAgo },
+      },
+      select: { openedAt: true },
+    });
+
+    const recentClicks = await prisma.campaignLinkClick.findMany({
+      where: {
+        campaignId: id,
+        clickedAt: { gte: sevenDaysAgo },
+      },
+      select: { clickedAt: true },
+    });
+
+    // Aggregate by day
+    const timeline: Record<
+      string,
+      { date: string; opens: number; clicks: number }
+    > = {};
+    for (const r of recentOpens) {
+      if (!r.openedAt) continue;
+      const day = r.openedAt.toISOString().slice(0, 10);
+      timeline[day] = timeline[day] ?? { date: day, opens: 0, clicks: 0 };
+      timeline[day].opens++;
+    }
+    for (const c of recentClicks) {
+      const day = c.clickedAt.toISOString().slice(0, 10);
+      timeline[day] = timeline[day] ?? { date: day, opens: 0, clicks: 0 };
+      timeline[day].clicks++;
+    }
+
+    const metrics = campaign.metrics as Record<string, number> | null;
+    const sent = metrics?.sent ?? 0;
+    const opened = metrics?.opened ?? 0;
+    const clicked = metrics?.clicked ?? 0;
+    const bounced = metrics?.bounced ?? 0;
+    const unsubscribed = metrics?.unsubscribed ?? 0;
+    const failed = metrics?.failed ?? 0;
+
+    sendSuccess(reply, {
+      campaign: {
+        id: campaign.id,
+        name: campaign.name,
+        type: campaign.type,
+        status: campaign.status,
+        subject: campaign.subjectLine,
+        fromName: campaign.fromName,
+        sentAt: campaign.sentAt,
+        scheduledAt: campaign.scheduledAt,
+        template: campaign.template,
+        segment: campaign.segment,
+        createdBy: campaign.createdBy,
+      },
+      metrics: {
+        totalRecipients,
+        sent,
+        opened,
+        clicked,
+        bounced,
+        unsubscribed,
+        failed,
+        openRate: sent > 0 ? ((opened / sent) * 100).toFixed(1) : "0.0",
+        clickRate: sent > 0 ? ((clicked / sent) * 100).toFixed(1) : "0.0",
+        clickToOpenRate:
+          opened > 0 ? ((clicked / opened) * 100).toFixed(1) : "0.0",
+        bounceRate: sent > 0 ? ((bounced / sent) * 100).toFixed(1) : "0.0",
+        unsubscribeRate:
+          sent > 0 ? ((unsubscribed / sent) * 100).toFixed(1) : "0.0",
+      },
+      statusBreakdown,
+      topLinks: topLinks.map((l) => ({
+        url: l.url,
+        clicks: l._count.id,
+      })),
+      timeline: Object.values(timeline).sort((a, b) =>
+        a.date.localeCompare(b.date)
+      ),
+    });
+  });
+
   // ─── Agent Activity ──────────────────────────────────
   app.get("/agents/activity", async (request, reply) => {
     const tenantId = getTenantId(request);

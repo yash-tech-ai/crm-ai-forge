@@ -353,6 +353,134 @@ export async function campaignRoutes(app: FastifyInstance) {
     });
   });
 
+  // ─── Configure A/B Test ────────────────────────────
+  app.post("/:id/ab-test", async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = validate(idParamSchema, request.params);
+
+    const abTestSchema = z.object({
+      enabled: z.boolean(),
+      testType: z.enum(["subject", "content", "sender"]),
+      variants: z
+        .array(
+          z.object({
+            name: z.string(),
+            weight: z.number().min(1).max(100),
+            subjectLine: z.string().optional(),
+            templateId: z.string().optional(),
+            fromName: z.string().optional(),
+          })
+        )
+        .min(2)
+        .max(4),
+      winnerCriteria: z
+        .enum(["open_rate", "click_rate", "conversion"])
+        .default("open_rate"),
+      testDurationHours: z.number().min(1).max(72).default(4),
+      testSamplePercent: z.number().min(10).max(50).default(20),
+    });
+
+    const body = validate(abTestSchema, request.body);
+
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, tenantId },
+    });
+    if (!campaign) return sendNotFound(reply, "Campaign");
+
+    if (!["DRAFT", "SCHEDULED"].includes(campaign.status)) {
+      return reply.status(409).send({
+        success: false,
+        error: {
+          code: "INVALID_STATE",
+          message:
+            "A/B test can only be configured on draft or scheduled campaigns",
+        },
+      });
+    }
+
+    const totalWeight = body.variants.reduce((sum, v) => sum + v.weight, 0);
+    if (totalWeight !== 100) {
+      return reply.status(400).send({
+        success: false,
+        error: {
+          code: "INVALID_WEIGHTS",
+          message: `Variant weights must sum to 100 (currently ${totalWeight})`,
+        },
+      });
+    }
+
+    const updated = await prisma.campaign.update({
+      where: { id },
+      data: { abTestConfig: body },
+    });
+
+    sendSuccess(reply, updated);
+  });
+
+  // ─── Get A/B Test Results ──────────────────────────
+  app.get("/:id/ab-test/results", async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = validate(idParamSchema, request.params);
+
+    const campaign = await prisma.campaign.findFirst({
+      where: { id, tenantId },
+    });
+    if (!campaign) return sendNotFound(reply, "Campaign");
+
+    const abConfig = campaign.abTestConfig as {
+      enabled?: boolean;
+      variants?: { name: string; weight: number }[];
+      winnerCriteria?: string;
+    } | null;
+
+    if (!abConfig?.enabled || !abConfig.variants) {
+      return reply.status(400).send({
+        success: false,
+        error: {
+          code: "NO_AB_TEST",
+          message: "This campaign does not have an A/B test configured",
+        },
+      });
+    }
+
+    const variantResults = await Promise.all(
+      abConfig.variants.map(async (variant) => {
+        const recipients = await prisma.campaignRecipient.findMany({
+          where: { campaignId: id, variant: variant.name },
+          select: { status: true, openedAt: true, clickedAt: true },
+        });
+
+        const total = recipients.length;
+        const opened = recipients.filter((r) => r.openedAt).length;
+        const clicked = recipients.filter((r) => r.clickedAt).length;
+
+        return {
+          variant: variant.name,
+          weight: variant.weight,
+          recipients: total,
+          opened,
+          clicked,
+          openRate: total > 0 ? ((opened / total) * 100).toFixed(1) : "0.0",
+          clickRate:
+            total > 0 ? ((clicked / total) * 100).toFixed(1) : "0.0",
+        };
+      })
+    );
+
+    const criteria = abConfig.winnerCriteria ?? "open_rate";
+    const sorted = [...variantResults].sort((a, b) => {
+      if (criteria === "click_rate")
+        return parseFloat(b.clickRate) - parseFloat(a.clickRate);
+      return parseFloat(b.openRate) - parseFloat(a.openRate);
+    });
+
+    sendSuccess(reply, {
+      variants: variantResults,
+      winner: sorted[0]?.variant ?? null,
+      winnerCriteria: criteria,
+    });
+  });
+
   // ─── Delete Campaign ─────────────────────────────────
   app.delete("/:id", async (request, reply) => {
     const tenantId = getTenantId(request);
