@@ -19,8 +19,13 @@ RUN pnpm install --frozen-lockfile
 # Copy source
 COPY . .
 
-# Generate Prisma client
-RUN pnpm --filter @crm-ai-forge/database exec prisma generate
+# Generate Prisma client (resolve via Node to handle pnpm's symlink structure)
+RUN node -e " \
+  const p = require.resolve('prisma/package.json', {paths: [process.cwd()+'/packages/database']}); \
+  require('child_process').execSync( \
+    'node ' + require('path').join(require('path').dirname(p), 'build', 'index.js') + ' generate --schema=packages/database/prisma/schema.prisma', \
+    {stdio: 'inherit'} \
+  );"
 
 # Build all packages (Turborepo handles dependency order)
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
